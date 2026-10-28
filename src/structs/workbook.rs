@@ -13,6 +13,7 @@ use crate::{
     reader::xlsx::raw_to_deserialize_by_worksheet,
     structs::{
         Address,
+        CalculationProperties,
         CellValue,
         Cells,
         DefinedName,
@@ -49,6 +50,7 @@ pub struct Workbook {
     workbook_protection:   Option<Box<WorkbookProtection>>,
     defined_names:         Vec<DefinedName>,
     date1904:              bool,
+    calculation_properties: CalculationProperties,
 }
 
 impl Workbook {
@@ -1028,6 +1030,28 @@ impl Workbook {
     #[inline]
     pub fn set_date1904(&mut self, value: bool) -> &mut Self {
         self.date1904 = value;
+        self
+    }
+
+    /// Get the calculation properties of the workbook (`calcPr`).
+    #[inline]
+    #[must_use]
+    pub fn calculation_properties(&self) -> &CalculationProperties {
+        &self.calculation_properties
+    }
+
+    /// Get the calculation properties of the workbook in mutable.
+    #[inline]
+    pub fn calculation_properties_mut(&mut self) -> &mut CalculationProperties {
+        &mut self.calculation_properties
+    }
+
+    /// Set the calculation properties of the workbook.
+    /// # Arguments
+    /// * `value` - `CalculationProperties`
+    #[inline]
+    pub fn set_calculation_properties(&mut self, value: CalculationProperties) -> &mut Self {
+        self.calculation_properties = value;
         self
     }
 
