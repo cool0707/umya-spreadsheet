@@ -177,6 +177,12 @@ impl CellValue {
     }
 
     #[inline]
+    pub(crate) fn set_rich_text_crate(&mut self, value: RichText) -> &mut Self {
+        self.raw_value = CellRawValue::RichText(value);
+        self
+    }
+
+    #[inline]
     pub fn set_value_bool(&mut self, value: bool) -> &mut Self {
         self.raw_value = CellRawValue::Bool(value);
         self.remove_formula();
