@@ -132,6 +132,12 @@ impl SharedStringItem {
         reader: &mut Reader<R>,
         _e: &BytesStart,
     ) {
+        self.read_until(reader, b"si");
+    }
+
+    /// Reads the children of `<si>` or of an inline string `<is>` (same
+    /// content model) up to the closing `end` tag.
+    pub(crate) fn read_until<R: std::io::BufRead>(&mut self, reader: &mut Reader<R>, end: &[u8]) {
         let mut vec_text_element: Vec<TextElement> = Vec::new();
 
         xml_read_loop!(
@@ -155,7 +161,7 @@ impl SharedStringItem {
                 }
             },
             Event::End(ref e) => {
-                if e.name().into_inner() == b"si" {
+                if e.name().into_inner() == end {
                     if !vec_text_element.is_empty() {
                         let mut obj = RichText::default();
                         obj.set_rich_text_elements(vec_text_element);
@@ -164,7 +170,7 @@ impl SharedStringItem {
                     return;
                 }
             },
-            Event::Eof => panic!("Error: Could not find {} end element", "si")
+            Event::Eof => panic!("Error: Could not find {} end element", String::from_utf8_lossy(end))
         );
     }
 

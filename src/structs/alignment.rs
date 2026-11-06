@@ -27,6 +27,7 @@ pub struct Alignment {
     horizontal:    EnumValue<HorizontalAlignmentValues>,
     vertical:      EnumValue<VerticalAlignmentValues>,
     wrap_text:     BooleanValue,
+    shrink_to_fit: BooleanValue,
     text_rotation: UInt32Value,
     indent:        UInt32Value,
 }
@@ -88,6 +89,17 @@ impl Alignment {
 
     #[inline]
     #[must_use]
+    pub fn shrink_to_fit(&self) -> bool {
+        self.shrink_to_fit.value()
+    }
+
+    #[inline]
+    pub fn set_shrink_to_fit(&mut self, value: bool) {
+        self.shrink_to_fit.set_value(value);
+    }
+
+    #[inline]
+    #[must_use]
     pub fn text_rotation(&self) -> u32 {
         self.text_rotation.value()
     }
@@ -124,10 +136,11 @@ impl Alignment {
 
     pub(crate) fn hash_code(&self) -> String {
         crate::helper::utils::md5_hash(format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             self.horizontal.hash_string(),
             self.vertical.hash_string(),
             self.wrap_text.hash_string(),
+            self.shrink_to_fit.hash_string(),
             self.text_rotation.hash_string(),
             self.indent.hash_string(),
         ))
@@ -147,6 +160,7 @@ impl Alignment {
         set_string_from_xml!(self, e, horizontal, "horizontal");
         set_string_from_xml!(self, e, vertical, "vertical");
         set_string_from_xml!(self, e, wrap_text, "wrapText");
+        set_string_from_xml!(self, e, shrink_to_fit, "shrinkToFit");
         set_string_from_xml!(self, e, text_rotation, "textRotation");
         set_string_from_xml!(self, e, indent, "indent");
     }
@@ -162,6 +176,9 @@ impl Alignment {
         }
         if self.wrap_text.has_value() {
             attributes.push(("wrapText", self.wrap_text.value_string()).into());
+        }
+        if self.shrink_to_fit.has_value() {
+            attributes.push(("shrinkToFit", self.shrink_to_fit.value_string()).into());
         }
         let text_rotation = self.text_rotation.value_string();
         if self.text_rotation.has_value() {
