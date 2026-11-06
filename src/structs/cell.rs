@@ -612,6 +612,19 @@ impl Cell {
                         obj.set_attributes(reader, e, false, &cell_reference, formula_shared_list);
                         self.cell_value.set_formula_obj(obj);
                     }
+                    // Inline string (`t="inlineStr"`): plain `<t>` or rich text
+                    // runs `<r>`, the same content as a shared string item.
+                    b"is" => {
+                        let mut item = SharedStringItem::default();
+                        item.read_until(reader, b"is");
+                        if let Some(v) = item.rich_text() {
+                            self.cell_value.set_rich_text_crate(v.clone());
+                        } else if let Some(v) = item.text() {
+                            self.set_value_string_crate(v.value());
+                        } else {
+                            self.set_value_string_crate("");
+                        }
+                    }
                     b"t" => {
                         if let Some(Ok(attribute)) = e.attributes().next() {
                             if attribute.key.into_inner() == b"xml:space"
@@ -876,6 +889,47 @@ mod tests {
         assert_eq!(cell.formatted_value(), "0050");
         assert_eq!(cell.data_type(), "s");
         assert!(cell.value_number().is_none());
+    }
+
+    fn read_cell(xml: &str) -> Cell {
+        let mut reader = Reader::from_str(xml);
+        let cell_start = match reader.read_event().unwrap() {
+            Event::Start(event) => event,
+            event => panic!("expected cell start event, got {event:?}"),
+        };
+        let mut cell = Cell::default();
+        let mut formula_shared_list = HashMap::new();
+        cell.set_attributes(
+            &mut reader,
+            &cell_start,
+            &SharedStringTable::default(),
+            &Stylesheet::default(),
+            false,
+            &mut formula_shared_list,
+        );
+        cell
+    }
+
+    #[test]
+    fn inline_rich_text_keeps_every_run() {
+        let cell = read_cell(
+            r#"<c r="A1" t="inlineStr"><is><r><t>Hello </t></r><r><rPr><b/><color rgb="FFFF0000"/></rPr><t>World</t></r></is></c>"#,
+        );
+        assert_eq!(cell.value(), "Hello World");
+        let rich = cell.cell_value.rich_text().expect("rich text");
+        let runs = rich.rich_text_elements();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text(), "Hello ");
+        assert_eq!(runs[1].text(), "World");
+        assert!(runs[1].run_properties().unwrap().bold());
+    }
+
+    #[test]
+    fn inline_string_ignores_phonetic_text() {
+        let cell = read_cell(
+            r#"<c r="A1" t="inlineStr"><is><t>漢字</t><rPh sb="0" eb="2"><t>カンジ</t></rPh></is></c>"#,
+        );
+        assert_eq!(cell.value(), "漢字");
     }
 
     #[test]
