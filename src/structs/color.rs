@@ -404,8 +404,10 @@ impl Color {
         self
     }
 
+    /// The color is given (automatic, a theme color, an index or ARGB).
     #[inline]
-    pub(crate) fn has_value(&self) -> bool {
+    #[must_use]
+    pub fn has_value(&self) -> bool {
         self.automatic.is_some()
             || self.theme_index.is_some()
             || self.indexed.is_some()
