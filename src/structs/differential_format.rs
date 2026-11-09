@@ -15,10 +15,14 @@ use super::{
     Borders,
     Fill,
     Font,
+    NumberingFormat,
     Style,
 };
 use crate::{
-    reader::driver::xml_read_loop,
+    reader::driver::{
+        get_attribute,
+        xml_read_loop,
+    },
     writer::driver::{
         write_end_tag,
         write_start_tag,
@@ -31,6 +35,7 @@ pub(crate) struct DifferentialFormat {
     fill:      Option<Fill>,
     borders:   Option<Box<Borders>>,
     alignment: Option<Alignment>,
+    numbering_format: Option<NumberingFormat>,
 }
 
 impl DifferentialFormat {
@@ -153,6 +158,9 @@ impl DifferentialFormat {
         style.set_fill_crate(self.fill.clone());
         style.set_borders_crate(self.borders.as_deref().cloned());
         style.set_alignment_crate(self.alignment.clone());
+        if let Some(v) = &self.numbering_format {
+            style.set_numbering_format(v.clone());
+        }
         style
     }
 
@@ -168,11 +176,12 @@ impl DifferentialFormat {
         self.fill = style.fill().cloned();
         self.borders = style.borders().cloned().map(Box::new);
         self.alignment = style.alignment().cloned();
+        self.numbering_format = style.numbering_format().cloned();
     }
 
     pub(crate) fn hash_code(&self) -> String {
         crate::helper::utils::md5_hash(format!(
-            "{}{}{}{}",
+            "{}{}{}{}{}",
             match &self.font {
                 Some(v) => {
                     v.hash_code()
@@ -205,6 +214,14 @@ impl DifferentialFormat {
                     "None".into()
                 }
             },
+            match &self.numbering_format {
+                Some(v) => {
+                    v.hash_code()
+                }
+                None => {
+                    "None".into()
+                }
+            },
         ))
     }
 
@@ -220,12 +237,20 @@ impl DifferentialFormat {
     ) {
         xml_read_loop!(
             reader,
+            Event::Empty(ref e) => {
+                if e.local_name().into_inner() == b"numFmt" {
+                    self.numbering_format = Self::numbering_format_of(e);
+                }
+            },
             Event::Start(ref e) => {
-                match e.name().into_inner() {
+                match e.local_name().into_inner() {
                     b"font" => {
                         let mut obj = Font::default();
                         obj.set_attributes(reader, e);
                         self.set_font(obj);
+                    }
+                    b"numFmt" => {
+                        self.numbering_format = Self::numbering_format_of(e);
                     }
                     b"fill" => {
                         let mut obj = Fill::default();
@@ -246,7 +271,7 @@ impl DifferentialFormat {
                 }
             },
             Event::End(ref e) => {
-                if e.name().into_inner() == b"dxf" {
+                if e.local_name().into_inner() == b"dxf" {
                     return
                 }
             },
@@ -254,22 +279,61 @@ impl DifferentialFormat {
         );
     }
 
+    /// `<numFmt numFmtId=".." formatCode=".."/>` of a dxf.
+    fn numbering_format_of(e: &BytesStart) -> Option<NumberingFormat> {
+        let id = get_attribute(e, b"numFmtId").and_then(|v| v.parse::<u32>().ok());
+        let code = get_attribute(e, b"formatCode")
+            .and_then(|v| quick_xml::escape::unescape(&v).ok().map(|c| c.to_string()));
+        let mut obj = NumberingFormat::default();
+        match (id, code) {
+            (Some(id), Some(code)) => {
+                obj.set_format_code(code);
+                obj.set_number_format_id_crate(id);
+            }
+            (_, Some(code)) => {
+                obj.set_format_code(code);
+            }
+            (Some(id), None) => {
+                obj.set_number_format_id_crate(id);
+                if let Some(code) = super::numbering_format::FILL_BUILT_IN_FORMAT_CODES.get(&id) {
+                    obj.set_format_code_crate(*code);
+                }
+            }
+            (None, None) => return None,
+        }
+        Some(obj)
+    }
+
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        // dxf
-        write_start_tag(writer, "dxf", vec![], false);
+        self.write_to_tag(writer, "dxf", 0);
+    }
+
+    /// Writes the format as `tag` (dxf, x14:dxf); a number format of its own
+    /// gets the id `custom_id` unless it was read with one.
+    pub(crate) fn write_to_tag(
+        &self,
+        writer: &mut Writer<Cursor<Vec<u8>>>,
+        tag: &str,
+        custom_id: u32,
+    ) {
+        write_start_tag(writer, tag, vec![], false);
 
         // font
         if let Some(v) = &self.font {
             v.write_to_font(writer);
         }
 
-        // fill
-        if let Some(v) = &self.fill {
-            v.write_to(writer);
+        // numFmt
+        if let Some(v) = &self.numbering_format {
+            let id = match v.number_format_id() {
+                999_999 => custom_id,
+                id => id,
+            };
+            v.write_to(writer, id);
         }
 
-        // border
-        if let Some(v) = &self.borders {
+        // fill
+        if let Some(v) = &self.fill {
             v.write_to(writer);
         }
 
@@ -278,6 +342,11 @@ impl DifferentialFormat {
             v.write_to(writer);
         }
 
-        write_end_tag(writer, "dxf");
+        // border
+        if let Some(v) = &self.borders {
+            v.write_to(writer);
+        }
+
+        write_end_tag(writer, tag);
     }
 }

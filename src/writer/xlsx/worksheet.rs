@@ -308,8 +308,26 @@ fn write_worksheet_extensions(writer: &mut InternalWriter, worksheet: &Worksheet
     r_id = write_drawings(writer, worksheet, r_id);
     write_tables_and_objects(writer, worksheet, r_id);
 
-    if worksheet.data_validations_2010().is_some() {
+    let cf2010 = worksheet.conditional_formatting_2010_collection();
+    if worksheet.data_validations_2010().is_some() || !cf2010.is_empty() {
         write_start_tag(writer, "extLst", vec![], false);
+        if !cf2010.is_empty() {
+            write_start_tag(
+                writer,
+                "ext",
+                vec![
+                    ("uri", "{78C0D931-6437-407d-A8EE-F0AAD7539E65}").into(),
+                    ("xmlns:x14", SHEET_MS_MAIN_NS).into(),
+                ],
+                false,
+            );
+            write_start_tag(writer, "x14:conditionalFormattings", vec![], false);
+            for v in cf2010 {
+                v.write_to_x14(writer);
+            }
+            write_end_tag(writer, "x14:conditionalFormattings");
+            write_end_tag(writer, "ext");
+        }
         if let Some(v) = worksheet.data_validations_2010() {
             v.write_to(writer);
         }

@@ -156,6 +156,14 @@ fn read_from_reader<R: io::BufRead>(
                 obj.set_attributes(&mut reader, e, stylesheet.differential_formats());
                 worksheet.add_conditional_formatting_collection(obj);
             }
+            b"x14:conditionalFormattings" => {
+                for obj in ConditionalFormatting::read_x14_collection(
+                    &mut reader,
+                    stylesheet.differential_formats(),
+                ) {
+                    worksheet.add_conditional_formatting_2010_collection(obj);
+                }
+            }
             b"dataValidations" => {
                 let mut obj = DataValidations::default();
                 obj.set_attributes(&mut reader, e);
