@@ -20,9 +20,11 @@ use crate::{
         xml_read_loop,
     },
     traits::AdjustmentCoordinate,
+    helper::const_str::EXCEL_MAIN_NS,
     writer::driver::{
         write_end_tag,
         write_start_tag,
+        write_text_node,
     },
 };
 
@@ -116,14 +118,25 @@ impl ConditionalFormatting {
             reader,
             ref n @ (Event::Empty(ref e) | Event::Start(ref e)) => {
                 let is_empty = matches!(n, Event::Empty(_));
-                if e.name().into_inner() == b"cfRule" {
-                    let mut obj = ConditionalFormattingRule::default();
-                    obj.set_attributes(reader, e, differential_formats, is_empty);
-                    self.conditional_collection.push(obj);
+                match e.local_name().into_inner() {
+                    b"cfRule" => {
+                        let mut obj = ConditionalFormattingRule::default();
+                        obj.set_attributes(reader, e, differential_formats, is_empty);
+                        self.conditional_collection.push(obj);
+                    }
+                    // x14: <xm:sqref>A1:A10</xm:sqref>
+                    b"sqref" if !is_empty => {
+                        let mut buf = Vec::new();
+                        if let Ok(text) = reader.read_text_into(e.name(), &mut buf) {
+                            self.sequence_of_references
+                                .set_sqref(crate::helper::utils::unescape_xml_text(&text).trim());
+                        }
+                    }
+                    _ => (),
                 }
             },
             Event::End(ref e) => {
-                if e.name().into_inner() == b"conditionalFormatting" {
+                if e.local_name().into_inner() == b"conditionalFormatting" {
                     return
                 }
             },
@@ -156,6 +169,49 @@ impl ConditionalFormatting {
         }
     }
 }
+impl ConditionalFormatting {
+    /// Writes the formatting as an Excel 2010 one (`x14:conditionalFormatting`).
+    pub(crate) fn write_to_x14(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
+        write_start_tag(
+            writer,
+            "x14:conditionalFormatting",
+            vec![("xmlns:xm", EXCEL_MAIN_NS).into()],
+            false,
+        );
+        for v in &self.conditional_collection {
+            v.write_to_x14(writer);
+        }
+        write_start_tag(writer, "xm:sqref", vec![], false);
+        write_text_node(writer, self.sequence_of_references.get_sqref());
+        write_end_tag(writer, "xm:sqref");
+        write_end_tag(writer, "x14:conditionalFormatting");
+    }
+
+    /// Reads `x14:conditionalFormattings` (in the worksheet's extLst).
+    pub(crate) fn read_x14_collection<R: std::io::BufRead>(
+        reader: &mut Reader<R>,
+        differential_formats: &DifferentialFormats,
+    ) -> Vec<Self> {
+        let mut out = Vec::new();
+        xml_read_loop!(
+            reader,
+            Event::Start(ref e) => {
+                if e.local_name().into_inner() == b"conditionalFormatting" {
+                    let mut obj = Self::default();
+                    obj.set_attributes(reader, e, differential_formats);
+                    out.push(obj);
+                }
+            },
+            Event::End(ref e) => {
+                if e.local_name().into_inner() == b"conditionalFormattings" {
+                    return out
+                }
+            },
+            Event::Eof => return out
+        );
+    }
+}
+
 impl AdjustmentCoordinate for ConditionalFormatting {
     #[inline]
     fn adjustment_insert_coordinate(

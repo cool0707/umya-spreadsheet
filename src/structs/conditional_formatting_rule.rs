@@ -15,6 +15,7 @@ use super::{
     ConditionalFormatValues,
     ConditionalFormattingOperatorValues,
     DataBar,
+    DifferentialFormat,
     DifferentialFormats,
     EnumValue,
     Formula,
@@ -31,9 +32,11 @@ use crate::{
         set_string_from_xml,
         xml_read_loop,
     },
+    helper::const_str::SHEET_MS_MAIN_NS,
     writer::driver::{
         write_end_tag,
         write_start_tag,
+        write_text_node,
     },
 };
 
@@ -55,7 +58,12 @@ pub struct ConditionalFormattingRule {
     color_scale:   Option<ColorScale>,
     data_bar:      Option<DataBar>,
     icon_set:      Option<IconSet>,
-    formula:       Option<Box<Formula>>,
+    formulas:      Vec<Formula>,
+    /// x14: the id of an Excel 2010 rule.
+    id:            StringValue,
+    /// The id of the Excel 2010 rule that carries more of this rule
+    /// (`<extLst><ext><x14:id>`), for a data bar.
+    ext_id:        StringValue,
 }
 
 impl ConditionalFormattingRule {
@@ -226,7 +234,8 @@ impl ConditionalFormattingRule {
     #[inline]
     #[must_use]
     pub fn above_average(&self) -> bool {
-        self.above_average.value()
+        // true when not given.
+        !self.above_average.has_value() || self.above_average.value()
     }
 
     #[inline]
@@ -380,10 +389,11 @@ impl ConditionalFormattingRule {
         self
     }
 
+    /// The first formula.
     #[inline]
     #[must_use]
     pub fn formula(&self) -> Option<&Formula> {
-        self.formula.as_deref()
+        self.formulas.first()
     }
 
     #[inline]
@@ -393,15 +403,57 @@ impl ConditionalFormattingRule {
         self.formula()
     }
 
+    /// Sets the only formula.
     #[inline]
     pub fn set_formula(&mut self, value: Formula) -> &mut Self {
-        self.formula = Some(Box::new(value));
+        self.formulas = vec![value];
         self
     }
 
     #[inline]
     pub fn remove_formula(&mut self) -> &mut Self {
-        self.formula = None;
+        self.formulas.clear();
+        self
+    }
+
+    /// The formulas (two for between and notBetween).
+    #[inline]
+    #[must_use]
+    pub fn formula_collection(&self) -> &[Formula] {
+        &self.formulas
+    }
+
+    #[inline]
+    pub fn add_formula_collection(&mut self, value: Formula) -> &mut Self {
+        self.formulas.push(value);
+        self
+    }
+
+    /// x14: the id of an Excel 2010 rule ("" for others).
+    #[inline]
+    #[must_use]
+    pub fn id(&self) -> &str {
+        self.id.value_str()
+    }
+
+    #[inline]
+    pub fn set_id<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.id.set_value(value);
+        self
+    }
+
+    /// The id of the Excel 2010 rule (in the worksheet's
+    /// `conditional_formatting_2010_collection`) that carries more of this
+    /// rule ("" for none): the data bars Excel 2010 and later write.
+    #[inline]
+    #[must_use]
+    pub fn ext_id(&self) -> &str {
+        self.ext_id.value_str()
+    }
+
+    #[inline]
+    pub fn set_ext_id<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.ext_id.set_value(value);
         self
     }
 
@@ -414,6 +466,12 @@ impl ConditionalFormattingRule {
     ) {
         set_string_from_xml!(self, e, r#type, "type");
         set_string_from_xml!(self, e, operator, "operator");
+        if let Some(v) = get_attribute(e, b"text") {
+            // The attribute as written (&#12406; ...): unescaped, since the
+            // writer escapes it again.
+            let v = quick_xml::escape::unescape(&v).map_or(v.clone(), |u| u.to_string());
+            self.text.set_value(v);
+        }
 
         if let Some(v) = get_attribute(e, b"dxfId") {
             // A dxfId past the stylesheet's differential formats is ignored.
@@ -435,6 +493,7 @@ impl ConditionalFormattingRule {
         set_string_from_xml!(self, e, time_period, "timePeriod");
         set_string_from_xml!(self, e, above_average, "aboveAverage");
         set_string_from_xml!(self, e, equal_average, "equalAverage");
+        set_string_from_xml!(self, e, id, "id");
 
         if empty_flag {
             return;
@@ -443,7 +502,8 @@ impl ConditionalFormattingRule {
         xml_read_loop!(
             reader,
             Event::Start(ref e) => {
-                match e.name().into_inner() {
+                // Also the Excel 2010 rules: x14:dataBar, xm:f, x14:dxf, ...
+                match e.local_name().into_inner() {
                     b"colorScale" => {
                         let mut obj = ColorScale::default();
                         obj.set_attributes(reader, e);
@@ -459,21 +519,80 @@ impl ConditionalFormattingRule {
                         obj.set_attributes(reader, e);
                         self.icon_set = Some(obj);
                     }
-                    b"formula" => {
+                    b"formula" | b"f" => {
                         let mut obj = Formula::default();
                         obj.set_attributes(reader, e);
-                        self.formula = Some(Box::new(obj));
+                        self.formulas.push(obj);
+                    }
+                    b"dxf" => {
+                        let mut obj = DifferentialFormat::default();
+                        obj.set_attributes(reader, e);
+                        self.set_style(obj.style());
+                    }
+                    b"id" => {
+                        // <extLst><ext><x14:id>{...}</x14:id></ext></extLst>
+                        let mut buf = Vec::new();
+                        if let Ok(text) = reader.read_text_into(e.name(), &mut buf) {
+                            self.ext_id.set_value(crate::helper::utils::unescape_xml_text(&text).trim());
+                        }
                     }
                     _ => (),
                 }
             },
             Event::End(ref e) => {
-                if e.name().into_inner() == b"cfRule" {
+                if e.local_name().into_inner() == b"cfRule" {
                     return
                 }
             },
             Event::Eof => return
         );
+    }
+
+    fn attributes<'a>(&'a self, dxf_id: Option<&'a str>, x14: bool) -> crate::structs::AttrCollection<'a> {
+        let mut attributes: crate::structs::AttrCollection = Vec::new();
+        if self.r#type.has_value() {
+            attributes.push(("type", self.r#type.value_string()).into());
+        }
+        if self.operator.has_value() {
+            attributes.push(("operator", self.operator.value_string()).into());
+        }
+        if let Some(v) = dxf_id {
+            attributes.push(("dxfId", v).into());
+        }
+        if self.priority.has_value() {
+            attributes.push(("priority", self.priority.value_string()).into());
+        }
+        if self.percent.has_value() {
+            attributes.push(("percent", self.percent.value_string()).into());
+        }
+        if self.bottom.has_value() {
+            attributes.push(("bottom", self.bottom.value_string()).into());
+        }
+        if self.rank.has_value() {
+            attributes.push(("rank", self.rank.value_string()).into());
+        }
+        if self.stop_if_true.has_value() {
+            attributes.push(("stopIfTrue", self.stop_if_true.value_string()).into());
+        }
+        if self.std_dev.has_value() {
+            attributes.push(("stdDev", self.std_dev.value_string()).into());
+        }
+        if self.time_period.has_value() {
+            attributes.push(("timePeriod", self.time_period.value_string()).into());
+        }
+        if self.above_average.has_value() {
+            attributes.push(("aboveAverage", self.above_average.value_string()).into());
+        }
+        if self.equal_average.has_value() {
+            attributes.push(("equalAverage", self.equal_average.value_string()).into());
+        }
+        if self.text.has_value() {
+            attributes.push(("text", self.text.value_str()).into());
+        }
+        if x14 && self.id.has_value() {
+            attributes.push(("id", self.id.value_str()).into());
+        }
+        attributes
     }
 
     pub(crate) fn write_to(
@@ -484,76 +603,22 @@ impl ConditionalFormattingRule {
         let is_inner = self.color_scale.is_some()
             || self.data_bar.is_some()
             || self.icon_set.is_some()
-            || self.formula.is_some();
+            || !self.formulas.is_empty()
+            || self.ext_id.has_value();
 
         // cfRule
-        let mut attributes: crate::structs::AttrCollection = Vec::new();
-
-        let r#type = self.r#type.value_string();
-        if self.r#type.has_value() {
-            attributes.push(("type", r#type).into());
-        }
-
-        let operator = self.operator.value_string();
-        if self.operator.has_value() {
-            attributes.push(("operator", operator).into());
-        }
-
-        let dxf_id_str: String;
-        if let Some(v) = &self.style {
-            let dxf_id = differential_formats.set_style(v);
-            dxf_id_str = dxf_id.to_string();
-            attributes.push(("dxfId", &dxf_id_str).into());
-        }
-
-        let priority = self.priority.value_string();
-        if self.priority.has_value() {
-            attributes.push(("priority", &priority).into());
-        }
-
-        let percent = self.percent.value_string();
-        if self.percent.has_value() {
-            attributes.push(("percent", percent).into());
-        }
-
-        let bottom = self.bottom.value_string();
-        if self.bottom.has_value() {
-            attributes.push(("bottom", bottom).into());
-        }
-
-        let rank = self.rank.value_string();
-        if self.rank.has_value() {
-            attributes.push(("rank", &rank).into());
-        }
-
-        let stop_if_true = self.stop_if_true.value_string();
-        if self.stop_if_true.has_value() {
-            attributes.push(("stopIfTrue", stop_if_true).into());
-        }
-
-        let std_dev = self.std_dev.value_string();
-        if self.std_dev.has_value() {
-            attributes.push(("stdDev", &std_dev).into());
-        }
-
-        let time_period = self.time_period.value_string();
-        if self.time_period.has_value() {
-            attributes.push(("timePeriod", time_period).into());
-        }
-
-        let above_average = self.above_average.value_string();
-        if self.above_average.has_value() {
-            attributes.push(("aboveAverage", above_average).into());
-        }
-
-        let equal_average = self.equal_average.value_string();
-        if self.equal_average.has_value() {
-            attributes.push(("equalAverage", equal_average).into());
-        }
-
-        write_start_tag(writer, "cfRule", attributes, !is_inner);
+        let dxf_id = self
+            .style
+            .as_deref()
+            .map(|v| differential_formats.set_style(v).to_string());
+        write_start_tag(writer, "cfRule", self.attributes(dxf_id.as_deref(), false), !is_inner);
 
         if is_inner {
+            // formula
+            for v in &self.formulas {
+                v.write_to(writer);
+            }
+
             // colorScale
             if let Some(v) = &self.color_scale {
                 v.write_to(writer);
@@ -569,12 +634,53 @@ impl ConditionalFormattingRule {
                 v.write_to(writer);
             }
 
-            // formula
-            if let Some(v) = &self.formula {
-                v.write_to(writer);
+            // extLst
+            if self.ext_id.has_value() {
+                write_start_tag(writer, "extLst", vec![], false);
+                write_start_tag(
+                    writer,
+                    "ext",
+                    vec![
+                        ("uri", "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}").into(),
+                        ("xmlns:x14", SHEET_MS_MAIN_NS).into(),
+                    ],
+                    false,
+                );
+                write_start_tag(writer, "x14:id", vec![], false);
+                write_text_node(writer, self.ext_id.value_str());
+                write_end_tag(writer, "x14:id");
+                write_end_tag(writer, "ext");
+                write_end_tag(writer, "extLst");
             }
 
             write_end_tag(writer, "cfRule");
         }
+    }
+
+    /// Writes the rule as an Excel 2010 rule (`x14:cfRule`, its format inline).
+    pub(crate) fn write_to_x14(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
+        write_start_tag(writer, "x14:cfRule", self.attributes(None, true), false);
+
+        for v in &self.formulas {
+            write_start_tag(writer, "xm:f", vec![], false);
+            write_text_node(writer, v.address_str());
+            write_end_tag(writer, "xm:f");
+        }
+        if let Some(v) = &self.color_scale {
+            v.write_to_x14(writer);
+        }
+        if let Some(v) = &self.data_bar {
+            v.write_to_x14(writer);
+        }
+        if let Some(v) = &self.icon_set {
+            v.write_to_x14(writer);
+        }
+        if let Some(v) = &self.style {
+            let mut dxf = DifferentialFormat::default();
+            dxf.set_style(v);
+            dxf.write_to_tag(writer, "x14:dxf", super::differential_formats::custom_numfmt_id(0));
+        }
+
+        write_end_tag(writer, "x14:cfRule");
     }
 }

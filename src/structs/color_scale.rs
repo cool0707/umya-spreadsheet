@@ -87,7 +87,7 @@ impl ColorScale {
             reader,
             ref n @ (Event::Empty(ref e) | Event::Start(ref e)) => {
                 let is_empty = matches!(n, Event::Empty(_));
-                match e.name().into_inner() {
+                match e.local_name().into_inner() {
                     b"cfvo" => {
                         let mut obj = ConditionalFormatValueObject::default();
                         obj.set_attributes(reader, e, is_empty);
@@ -102,7 +102,7 @@ impl ColorScale {
                 }
             },
             Event::End(ref e) => {
-                if e.name().into_inner() == b"colorScale" {
+                if e.local_name().into_inner() == b"colorScale" {
                     return
                 }
             },
@@ -125,5 +125,17 @@ impl ColorScale {
         }
 
         write_end_tag(writer, "colorScale");
+    }
+
+    pub(crate) fn write_to_x14(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
+        // x14:colorScale
+        write_start_tag(writer, "x14:colorScale", vec![], false);
+        for v in &self.cfvo_collection {
+            v.write_to_x14(writer);
+        }
+        for v in &self.color_collection {
+            v.write_to(writer, "x14:color");
+        }
+        write_end_tag(writer, "x14:colorScale");
     }
 }

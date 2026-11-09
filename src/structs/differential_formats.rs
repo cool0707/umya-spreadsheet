@@ -105,6 +105,12 @@ impl DifferentialFormats {
                     self.set_differential_format(obj);
                 }
             },
+            // <dxf/> keeps its place so that the ids of the next ones hold.
+            Event::Empty(ref e) => {
+                if e.name().into_inner() == b"dxf" {
+                    self.set_differential_format(DifferentialFormat::default());
+                }
+            },
             Event::End(ref e) => {
                 if e.name().into_inner() == b"dxfs" {
                     return
@@ -125,11 +131,17 @@ impl DifferentialFormats {
             );
 
             // dxf
-            for differential_format in &self.differential_format {
-                differential_format.write_to(writer);
+            for (i, differential_format) in self.differential_format.iter().enumerate() {
+                differential_format.write_to_tag(writer, "dxf", custom_numfmt_id(i));
             }
 
             write_end_tag(writer, "dxfs");
         }
     }
+}
+
+/// The id written for the number format of its own of the dxf at `index`
+/// (an id that the workbook's number formats do not use).
+pub(crate) fn custom_numfmt_id(index: usize) -> u32 {
+    1000 + u32::try_from(index).unwrap_or(0)
 }

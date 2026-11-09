@@ -96,6 +96,7 @@ pub struct Worksheet {
     header_footer:                     HeaderFooter,
     sheet_views:                       SheetViews,
     conditional_formatting_collection: Vec<ConditionalFormatting>,
+    conditional_formatting_2010_collection: Vec<ConditionalFormatting>,
     merge_cells:                       MergeCells,
     auto_filter:                       Option<AutoFilter>,
     comments:                          Vec<Comment>,
@@ -889,6 +890,30 @@ impl Worksheet {
     #[inline]
     pub fn add_conditional_formatting_collection(&mut self, value: ConditionalFormatting) {
         self.conditional_formatting_collection.push(value);
+    }
+
+    /// The Excel 2010 conditional formatting (`x14:conditionalFormattings` in
+    /// the worksheet's extLst): data bars with negative values, borders and an
+    /// axis, more icon sets and icons chosen one by one. A data bar written
+    /// in both places is joined by `ConditionalFormattingRule::ext_id` and
+    /// `ConditionalFormattingRule::id`.
+    #[inline]
+    #[must_use]
+    pub fn conditional_formatting_2010_collection(&self) -> &[ConditionalFormatting] {
+        &self.conditional_formatting_2010_collection
+    }
+
+    #[inline]
+    pub fn set_conditional_formatting_2010_collection(
+        &mut self,
+        value: impl Into<Vec<ConditionalFormatting>>,
+    ) {
+        self.conditional_formatting_2010_collection = value.into();
+    }
+
+    #[inline]
+    pub fn add_conditional_formatting_2010_collection(&mut self, value: ConditionalFormatting) {
+        self.conditional_formatting_2010_collection.push(value);
     }
 
     // ************************
@@ -2973,7 +2998,11 @@ impl AdjustmentCoordinate for Worksheet {
         }
 
         // conditional styles
-        for conditional_styles in &mut self.conditional_formatting_collection {
+        for conditional_styles in self
+            .conditional_formatting_collection
+            .iter_mut()
+            .chain(self.conditional_formatting_2010_collection.iter_mut())
+        {
             conditional_styles.adjustment_insert_coordinate(
                 root_col_num,
                 offset_col_num,
@@ -3079,7 +3108,14 @@ impl AdjustmentCoordinate for Worksheet {
         self.conditional_formatting_collection.retain(|x| {
             !x.is_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num)
         });
-        for conditional_styles in &mut self.conditional_formatting_collection {
+        self.conditional_formatting_2010_collection.retain(|x| {
+            !x.is_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num)
+        });
+        for conditional_styles in self
+            .conditional_formatting_collection
+            .iter_mut()
+            .chain(self.conditional_formatting_2010_collection.iter_mut())
+        {
             conditional_styles.adjustment_remove_coordinate(
                 root_col_num,
                 offset_col_num,

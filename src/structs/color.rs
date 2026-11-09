@@ -404,8 +404,10 @@ impl Color {
         self
     }
 
+    /// The color is given (automatic, a theme color, an index or ARGB).
     #[inline]
-    pub(crate) fn has_value(&self) -> bool {
+    #[must_use]
+    pub fn has_value(&self) -> bool {
         self.automatic.is_some()
             || self.theme_index.is_some()
             || self.indexed.is_some()
@@ -497,10 +499,9 @@ impl Color {
         let mut buf = Vec::new();
         loop {
             match reader.read_event_into(&mut buf) {
-                Ok(Event::End(ref e)) => match e.name().into_inner() {
-                    b"color" | b"fgColor" | b"bgColor" | b"tabColor" => return,
-                    _ => (),
-                },
+                // A color has no children: its end (color, fgColor, bgColor,
+                // tabColor, x14:fillColor, x14:axisColor, ...) ends it.
+                Ok(Event::End(_)) => return,
                 Ok(Event::Eof) => panic!(
                     "Error: Could not find {} end element",
                     "color,fgColor,bgColor,tabColor"
@@ -536,7 +537,7 @@ impl Color {
         self.write_to(writer, "tabColor");
     }
 
-    fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>, tag_name: &str) {
+    pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>, tag_name: &str) {
         let mut attributes: crate::structs::AttrCollection = Vec::new();
 
         if let Some(automatic) = self.automatic {
