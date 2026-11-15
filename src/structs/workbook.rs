@@ -15,6 +15,7 @@ use crate::{
         Address,
         CalculationProperties,
         CellMetadata,
+        RichData,
         CellValue,
         Cells,
         DefinedName,
@@ -53,6 +54,7 @@ pub struct Workbook {
     date1904:              bool,
     calculation_properties: CalculationProperties,
     cell_metadata:         CellMetadata,
+    rich_data:             RichData,
 }
 
 impl Workbook {
@@ -1083,6 +1085,19 @@ impl Workbook {
     #[inline]
     pub(crate) fn set_cell_metadata(&mut self, value: CellMetadata) -> &mut Self {
         self.cell_metadata = value;
+        self
+    }
+
+    /// The rich values of the file the workbook was read from (what the
+    /// value metadata of its cells, `vm`, refers to).
+    #[inline]
+    pub(crate) fn rich_data(&self) -> &RichData {
+        &self.rich_data
+    }
+
+    #[inline]
+    pub(crate) fn set_rich_data(&mut self, value: RichData) -> &mut Self {
+        self.rich_data = value;
         self
     }
 

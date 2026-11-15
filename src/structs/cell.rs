@@ -65,6 +65,7 @@ pub struct Cell {
     style:                 Box<Style>,
     hyperlink:             Option<Box<Hyperlink>>,
     cell_meta_index:       UInt32Value,
+    value_meta_index:      UInt32Value,
 }
 impl Cell {
     #[inline]
@@ -232,6 +233,34 @@ impl Cell {
     #[inline]
     pub fn set_cell_meta_index(&mut self, value: u32) -> &mut Self {
         self.cell_meta_index.set_value(value);
+        self
+    }
+
+    /// The value metadata of the cell (`vm`, 0 without one): the 1-based
+    /// index of a block of the value metadata of the workbook the cell was
+    /// read from, which stands for the rich value in the cell — a picture
+    /// placed in it, a linked data type, the result of `IMAGE`. The value
+    /// of such a cell is an error (`#VALUE!`), what applications that do
+    /// not know rich values show.
+    ///
+    /// It is written while the value of the cell is an error; the rich
+    /// values themselves are kept as they were read. It means nothing in
+    /// another workbook.
+    #[inline]
+    #[must_use]
+    pub fn value_meta_index(&self) -> u32 {
+        self.value_meta_index.value()
+    }
+
+    /// Sets the value metadata of the cell (see [`Cell::value_meta_index`]);
+    /// 0 removes it.
+    #[inline]
+    pub fn set_value_meta_index(&mut self, value: u32) -> &mut Self {
+        if value == 0 {
+            self.value_meta_index = UInt32Value::default();
+        } else {
+            self.value_meta_index.set_value(value);
+        }
         self
     }
 
@@ -589,6 +618,7 @@ impl Cell {
         self.cell_value = cell.cell_value;
         self.style = cell.style;
         self.hyperlink = cell.hyperlink;
+        self.value_meta_index = cell.value_meta_index;
         self
     }
 
@@ -621,6 +651,7 @@ impl Cell {
         }
 
         set_string_from_xml!(self, e, cell_meta_index, "cm");
+        set_string_from_xml!(self, e, value_meta_index, "vm");
 
         if empty_flag {
             return;
@@ -769,6 +800,17 @@ impl Cell {
                 .dynamic_array_index(v.dynamic_array_collapsed())
                 .to_string();
             attributes.push(("cm", &cell_meta_index_str).into());
+        }
+
+        // The value metadata: the rich value in the cell, while the cell
+        // still holds the error that stands for it.
+        let value_meta_index_str: String;
+        if self.value_meta_index.has_value()
+            && self.data_type_crate() == "e"
+            && cell_metadata.use_value(self.value_meta_index.value())
+        {
+            value_meta_index_str = self.value_meta_index.value().to_string();
+            attributes.push(("vm", &value_meta_index_str).into());
         }
 
         if empty_flag_value {

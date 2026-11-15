@@ -189,6 +189,11 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
         writer_manager.file_list_sort();
         shared_strings::write(&shared_string_table, &mut writer_manager)?;
         styles::write(&stylesheet, &mut writer_manager)?;
+        // The rich values, when cells still refer to them.
+        let has_rich_data = cell_metadata.has_values() && !wb.rich_data().is_empty();
+        if has_rich_data {
+            wb.rich_data().write(&mut writer_manager)?;
+        }
         let has_cell_metadata = metadata::write(&cell_metadata, &mut writer_manager)?;
         workbook::write(wb, &mut writer_manager)?;
 
@@ -197,6 +202,7 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
             wb,
             has_shared_string_table,
             has_cell_metadata,
+            has_rich_data,
             &mut writer_manager,
         )?;
         content_types::write(wb, &mut writer_manager)?;

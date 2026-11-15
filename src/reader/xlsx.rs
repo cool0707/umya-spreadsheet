@@ -21,6 +21,7 @@ use crate::{
     structs::{
         Cell,
         CellMetadata,
+        RichData,
         SharedStringTable,
         Stylesheet,
         Workbook,
@@ -89,7 +90,8 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
         }
     }
 
-    // What the `cm` of the cells means (dynamic array formulas).
+    // What the `cm` (dynamic array formulas) and the `vm` (rich values) of
+    // the cells mean.
     for (_, type_value, rel_target) in &workbook_rel {
         if type_value == SHEET_METADATA_NS {
             if let Ok(file) = driver::zip_by_name(&mut arv, &format!("xl/{rel_target}")) {
@@ -97,6 +99,9 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
             }
         }
     }
+
+    // What the `vm` of the cells refers to (pictures placed in cells).
+    book.set_rich_data(RichData::read(&mut arv, &workbook_rel));
 
     shared_strings::read(&mut arv, &mut book)?;
     styles::read(&mut arv, &mut book)?;

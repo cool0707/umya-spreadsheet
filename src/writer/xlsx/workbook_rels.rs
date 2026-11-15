@@ -41,6 +41,7 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     wb: &Workbook,
     has_shared_string_table: bool,
     has_cell_metadata: bool,
+    has_rich_data: bool,
     writer_mng: &mut WriterManager<W>,
 ) -> Result<(), XlsxError> {
     let is_light = writer_mng.get_is_light();
@@ -117,6 +118,14 @@ pub(crate) fn write<W: io::Seek + io::Write>(
             "",
         );
         index += 1;
+    }
+
+    // relationships to the rich values
+    if has_rich_data {
+        for (rel_type, target) in wb.rich_data().workbook_relationships() {
+            write_relationship(&mut writer, &index.to_string(), rel_type, target, "");
+            index += 1;
+        }
     }
 
     // relationships for vbaProject if needed
