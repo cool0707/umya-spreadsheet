@@ -33,6 +33,7 @@ use crate::{
     },
     structs::{
         Cell,
+        CellMetadata,
         SharedStringTable,
         Stylesheet,
         Worksheet,
@@ -61,6 +62,7 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     worksheet: &Worksheet,
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &mut Stylesheet,
+    cell_metadata: &mut CellMetadata,
     has_macros: bool,
     writer_mng: &mut WriterManager<W>,
 ) -> Result<(), XlsxError> {
@@ -69,7 +71,13 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     write_worksheet_header(&mut writer);
     write_worksheet_properties(&mut writer, worksheet, has_macros);
     write_dimension_and_views(&mut writer, worksheet);
-    write_columns_and_rows(&mut writer, worksheet, shared_string_table, stylesheet);
+    write_columns_and_rows(
+        &mut writer,
+        worksheet,
+        shared_string_table,
+        stylesheet,
+        cell_metadata,
+    );
     write_worksheet_features(&mut writer, worksheet, stylesheet);
     write_worksheet_extensions(&mut writer, worksheet);
 
@@ -188,13 +196,20 @@ fn write_columns_and_rows(
     worksheet: &Worksheet,
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &mut Stylesheet,
+    cell_metadata: &mut CellMetadata,
 ) {
     let mut column_dimensions = worksheet.column_dimensions_crate().clone();
     column_dimensions
         .calculation_auto_width(worksheet.cells_crate(), worksheet.merge_cells_crate());
     column_dimensions.write_to(writer, stylesheet);
 
-    write_sheet_data(writer, worksheet, shared_string_table, stylesheet);
+    write_sheet_data(
+        writer,
+        worksheet,
+        shared_string_table,
+        stylesheet,
+        cell_metadata,
+    );
 }
 
 /// Writes the sheet data section containing rows and cells.
@@ -210,6 +225,7 @@ fn write_sheet_data(
     worksheet: &Worksheet,
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &mut Stylesheet,
+    cell_metadata: &mut CellMetadata,
 ) {
     let has_sheet_data = worksheet.has_sheet_data();
     write_start_tag(writer, "sheetData", vec![], !has_sheet_data);
@@ -225,6 +241,7 @@ fn write_sheet_data(
         shared_string_table,
         stylesheet,
         &formula_shared_list,
+        cell_metadata,
     );
 
     if has_sheet_data {
@@ -352,6 +369,7 @@ fn write_rows_and_cells(
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &mut Stylesheet,
     formula_shared_list: &HashMap<u32, (String, Option<String>)>,
+    cell_metadata: &mut CellMetadata,
 ) {
     let mut cells_iter = cells.iter().peekable();
 
@@ -372,6 +390,7 @@ fn write_rows_and_cells(
             shared_string_table,
             stylesheet,
             formula_shared_list,
+            cell_metadata,
         );
     }
 }
@@ -393,6 +412,7 @@ fn write_row_with_cells(
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &mut Stylesheet,
     formula_shared_list: &HashMap<u32, (String, Option<String>)>,
+    cell_metadata: &mut CellMetadata,
 ) {
     if cells_in_row.is_empty() {
         let spans = "0:0";
@@ -407,7 +427,13 @@ fn write_row_with_cells(
         row.write_to(writer, stylesheet, &spans, false);
 
         for cell in cells_in_row {
-            cell.write_to(writer, shared_string_table, stylesheet, formula_shared_list);
+            cell.write_to(
+                writer,
+                shared_string_table,
+                stylesheet,
+                formula_shared_list,
+                cell_metadata,
+            );
         }
 
         write_end_tag(writer, "row");
@@ -623,6 +649,7 @@ mod tests {
             &shared_string_table,
             &mut stylesheet,
             &formula_shared_list,
+            &mut CellMetadata::default(),
         );
 
         let result = String::from_utf8(writer.into_inner().into_inner()).unwrap();
@@ -647,6 +674,7 @@ mod tests {
             &shared_string_table,
             &mut stylesheet,
             &formula_shared_list,
+            &mut CellMetadata::default(),
         );
 
         let result = String::from_utf8(writer.into_inner().into_inner()).unwrap();
@@ -742,6 +770,7 @@ mod tests {
             &worksheet,
             &shared_string_table,
             &mut stylesheet,
+            &mut CellMetadata::default(),
             false,
             &mut writer_manager,
         );

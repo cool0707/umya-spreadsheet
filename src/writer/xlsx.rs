@@ -27,6 +27,7 @@ pub(crate) mod drawing_rels;
 pub(crate) mod embeddings;
 pub(crate) mod jsa_project_bin;
 pub(crate) mod media;
+pub(crate) mod metadata;
 pub(crate) mod person;
 pub(crate) mod pivot_cache;
 pub(crate) mod pivot_table;
@@ -67,6 +68,13 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
 
         let shared_string_table = wb.shared_string_table();
         let mut stylesheet = wb.stylesheet().clone();
+        // The cell metadata the written cells refer to. Sheets written as
+        // they were read refer to the blocks of the file read.
+        let has_raw_sheets = wb
+            .sheet_collection_no_check()
+            .iter()
+            .any(|worksheet| !worksheet.is_deserialized());
+        let mut cell_metadata = wb.cell_metadata().for_writing(has_raw_sheets);
 
         // Process each worksheet
         wb.sheet_collection_no_check()
@@ -80,6 +88,7 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
                         worksheet,
                         &shared_string_table,
                         &mut stylesheet,
+                        &mut cell_metadata,
                         wb.has_macros(),
                         &mut writer_manager,
                     )
@@ -180,10 +189,16 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
         writer_manager.file_list_sort();
         shared_strings::write(&shared_string_table, &mut writer_manager)?;
         styles::write(&stylesheet, &mut writer_manager)?;
+        let has_cell_metadata = metadata::write(&cell_metadata, &mut writer_manager)?;
         workbook::write(wb, &mut writer_manager)?;
 
         let has_shared_string_table = shared_string_table.read().unwrap().has_value();
-        workbook_rels::write(wb, has_shared_string_table, &mut writer_manager)?;
+        workbook_rels::write(
+            wb,
+            has_shared_string_table,
+            has_cell_metadata,
+            &mut writer_manager,
+        )?;
         content_types::write(wb, &mut writer_manager)?;
     }
 

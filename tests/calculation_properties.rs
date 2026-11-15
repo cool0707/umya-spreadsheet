@@ -38,14 +38,14 @@ fn replace_workbook_xml(bytes: Vec<u8>, edit: impl Fn(&mut String)) -> Vec<u8> {
         let mut part = archive.by_index(index).unwrap();
         let mut bytes = Vec::new();
         part.read_to_end(&mut bytes).unwrap();
-        if part.name().unwrap() == "xl/workbook.xml" {
+        if part.name() == "xl/workbook.xml" {
             let mut xml = String::from_utf8(bytes).unwrap();
             edit(&mut xml);
             bytes = xml.into_bytes();
         }
         output
             .start_file(
-                part.name().unwrap(),
+                part.name(),
                 zip::write::SimpleFileOptions::default(),
             )
             .unwrap();

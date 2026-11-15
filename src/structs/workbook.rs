@@ -14,6 +14,7 @@ use crate::{
     structs::{
         Address,
         CalculationProperties,
+        CellMetadata,
         CellValue,
         Cells,
         DefinedName,
@@ -51,6 +52,7 @@ pub struct Workbook {
     defined_names:         Vec<DefinedName>,
     date1904:              bool,
     calculation_properties: CalculationProperties,
+    cell_metadata:         CellMetadata,
 }
 
 impl Workbook {
@@ -536,9 +538,15 @@ impl Workbook {
         }
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
+        let cell_metadata = &self.cell_metadata;
         for worksheet in &mut self.work_sheet_collection {
             if !worksheet.is_deserialized() {
-                raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+                raw_to_deserialize_by_worksheet(
+                    worksheet,
+                    &shared_string_table,
+                    &stylesheet,
+                    cell_metadata,
+                );
             }
         }
         self
@@ -554,7 +562,12 @@ impl Workbook {
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
         let worksheet = self.work_sheet_collection.get_mut(index).unwrap();
-        raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+        raw_to_deserialize_by_worksheet(
+            worksheet,
+            &shared_string_table,
+            &stylesheet,
+            &self.cell_metadata,
+        );
         self
     }
 
@@ -645,7 +658,12 @@ impl Workbook {
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
         let worksheet = self.work_sheet_collection.get_mut(index).unwrap();
-        raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+        raw_to_deserialize_by_worksheet(
+            worksheet,
+            &shared_string_table,
+            &stylesheet,
+            &self.cell_metadata,
+        );
         Ok(worksheet)
     }
 
@@ -1052,6 +1070,19 @@ impl Workbook {
     #[inline]
     pub fn set_calculation_properties(&mut self, value: CalculationProperties) -> &mut Self {
         self.calculation_properties = value;
+        self
+    }
+
+    /// The cell metadata of the file the workbook was read from (what the
+    /// `cm` of its cells means).
+    #[inline]
+    pub(crate) fn cell_metadata(&self) -> &CellMetadata {
+        &self.cell_metadata
+    }
+
+    #[inline]
+    pub(crate) fn set_cell_metadata(&mut self, value: CellMetadata) -> &mut Self {
+        self.cell_metadata = value;
         self
     }
 

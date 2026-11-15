@@ -61,6 +61,7 @@ pub_mod_use![
     pub calculation_properties,
     pub cell_formula_values,
     pub cell_formula,
+    pub(crate) cell_metadata,
     pub cell_raw_value,
     pub cell_style,
     pub cell_value,
