@@ -31,6 +31,8 @@ use crate::{
     },
     structs::{
         CellFormula,
+        CellMetadata,
+        CellMetadataBlock,
         CellFormulaValues,
         CellRawValue,
         CellValue,
@@ -210,6 +212,10 @@ impl Cell {
         self
     }
 
+    /// The index of the cell's metadata in the file the cell was read from
+    /// (`cm`, 0 without one). It is not written: what the metadata says
+    /// about the cell is kept with its formula
+    /// ([`CellFormula::dynamic_array`]).
     #[inline]
     #[must_use]
     pub fn cell_meta_index(&self) -> u32 {
@@ -561,6 +567,23 @@ impl Cell {
             && self.hyperlink.is_none()
     }
 
+    /// Takes what the workbook's cell metadata says about the cell (`cm`)
+    /// over to its formula.
+    #[inline]
+    pub(crate) fn resolve_cell_metadata(&mut self, cell_metadata: &CellMetadata) {
+        if !self.cell_meta_index.has_value() {
+            return;
+        }
+        if let (CellMetadataBlock::DynamicArray { collapsed }, Some(formula)) = (
+            cell_metadata.block(self.cell_meta_index.value()),
+            self.cell_value.formula.as_deref_mut(),
+        ) {
+            formula
+                .set_dynamic_array(true)
+                .set_dynamic_array_collapsed(collapsed);
+        }
+    }
+
     #[inline]
     pub(crate) fn set_obj(&mut self, cell: Self) -> &mut Self {
         self.cell_value = cell.cell_value;
@@ -711,6 +734,7 @@ impl Cell {
         shared_string_table: &RwLock<SharedStringTable>,
         stylesheet: &mut Stylesheet,
         formula_shared_list: &HashMap<u32, (String, Option<String>)>,
+        cell_metadata: &mut CellMetadata,
     ) {
         let empty_flag_value = self.cell_value.is_empty();
         let empty_flag_style = self.style.is_empty();
@@ -736,11 +760,16 @@ impl Cell {
             attributes.push(("s", &xf_index_str).into());
         }
 
-        // NOT SUPPORTED
-        // let cell_meta_index_str = self.cell_meta_index.get_value_string();
-        // if self.cell_meta_index.has_value() {
-        //    attributes.push(("cm", &cell_meta_index_str).into());
-        // }
+        // The cell metadata of a dynamic array formula. What `cm` was in the
+        // file read (cell_meta_index) says nothing here: the blocks are
+        // numbered again as the workbook is written.
+        let cell_meta_index_str: String;
+        if let Some(v) = self.cell_value.formula.as_deref().filter(|v| v.dynamic_array()) {
+            cell_meta_index_str = cell_metadata
+                .dynamic_array_index(v.dynamic_array_collapsed())
+                .to_string();
+            attributes.push(("cm", &cell_meta_index_str).into());
+        }
 
         if empty_flag_value {
             write_start_tag(writer, "c", attributes, true);
@@ -802,6 +831,15 @@ impl AdjustmentCoordinate for Cell {
             root_row_num,
             offset_row_num,
         );
+        // The range an array formula fills moves with its cell.
+        if let Some(formula) = self.cell_value.formula.as_deref_mut() {
+            formula.adjustment_insert_reference(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        }
     }
 
     #[inline]
@@ -818,6 +856,15 @@ impl AdjustmentCoordinate for Cell {
             root_row_num,
             offset_row_num,
         );
+        // The range an array formula fills moves with its cell.
+        if let Some(formula) = self.cell_value.formula.as_deref_mut() {
+            formula.adjustment_remove_reference(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        }
     }
 }
 impl AdjustmentCoordinateWith2Sheet for Cell {

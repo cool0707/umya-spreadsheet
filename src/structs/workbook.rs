@@ -13,6 +13,8 @@ use crate::{
     reader::xlsx::raw_to_deserialize_by_worksheet,
     structs::{
         Address,
+        CalculationProperties,
+        CellMetadata,
         CellValue,
         Cells,
         DefinedName,
@@ -49,6 +51,8 @@ pub struct Workbook {
     workbook_protection:   Option<Box<WorkbookProtection>>,
     defined_names:         Vec<DefinedName>,
     date1904:              bool,
+    calculation_properties: CalculationProperties,
+    cell_metadata:         CellMetadata,
 }
 
 impl Workbook {
@@ -534,9 +538,15 @@ impl Workbook {
         }
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
+        let cell_metadata = &self.cell_metadata;
         for worksheet in &mut self.work_sheet_collection {
             if !worksheet.is_deserialized() {
-                raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+                raw_to_deserialize_by_worksheet(
+                    worksheet,
+                    &shared_string_table,
+                    &stylesheet,
+                    cell_metadata,
+                );
             }
         }
         self
@@ -552,7 +562,12 @@ impl Workbook {
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
         let worksheet = self.work_sheet_collection.get_mut(index).unwrap();
-        raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+        raw_to_deserialize_by_worksheet(
+            worksheet,
+            &shared_string_table,
+            &stylesheet,
+            &self.cell_metadata,
+        );
         self
     }
 
@@ -643,7 +658,12 @@ impl Workbook {
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
         let worksheet = self.work_sheet_collection.get_mut(index).unwrap();
-        raw_to_deserialize_by_worksheet(worksheet, &shared_string_table, &stylesheet);
+        raw_to_deserialize_by_worksheet(
+            worksheet,
+            &shared_string_table,
+            &stylesheet,
+            &self.cell_metadata,
+        );
         Ok(worksheet)
     }
 
@@ -1028,6 +1048,41 @@ impl Workbook {
     #[inline]
     pub fn set_date1904(&mut self, value: bool) -> &mut Self {
         self.date1904 = value;
+        self
+    }
+
+    /// Get the calculation properties of the workbook (`calcPr`).
+    #[inline]
+    #[must_use]
+    pub fn calculation_properties(&self) -> &CalculationProperties {
+        &self.calculation_properties
+    }
+
+    /// Get the calculation properties of the workbook in mutable.
+    #[inline]
+    pub fn calculation_properties_mut(&mut self) -> &mut CalculationProperties {
+        &mut self.calculation_properties
+    }
+
+    /// Set the calculation properties of the workbook.
+    /// # Arguments
+    /// * `value` - `CalculationProperties`
+    #[inline]
+    pub fn set_calculation_properties(&mut self, value: CalculationProperties) -> &mut Self {
+        self.calculation_properties = value;
+        self
+    }
+
+    /// The cell metadata of the file the workbook was read from (what the
+    /// `cm` of its cells means).
+    #[inline]
+    pub(crate) fn cell_metadata(&self) -> &CellMetadata {
+        &self.cell_metadata
+    }
+
+    #[inline]
+    pub(crate) fn set_cell_metadata(&mut self, value: CellMetadata) -> &mut Self {
+        self.cell_metadata = value;
         self
     }
 

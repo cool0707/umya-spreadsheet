@@ -28,11 +28,16 @@ use crate::{
     structs::{
         BooleanValue,
         CellFormulaValues,
+        EnumTrait,
         EnumValue,
+        Range,
         StringValue,
         UInt32Value,
     },
-    traits::AdjustmentCoordinateWith2Sheet,
+    traits::{
+        AdjustmentCoordinate,
+        AdjustmentCoordinateWith2Sheet,
+    },
     writer::driver::{
         write_end_tag,
         write_start_tag,
@@ -54,8 +59,108 @@ pub struct CellFormula {
     shared_index:   UInt32Value,
     text:           StringValue,
     text_view:      StringValue,
+    dynamic_array:           bool,
+    dynamic_array_collapsed: bool,
 }
 impl CellFormula {
+    /// Whether the formula is a dynamic array formula: one Excel evaluates
+    /// as an array and whose result spills into the cells below and to the
+    /// right. Such a formula is an array formula ([`CellFormulaValues::Array`])
+    /// whose cell refers to the dynamic array properties of the workbook's
+    /// cell metadata (`cm`, `xl/metadata.xml`); `reference()` is the range
+    /// the result filled when the workbook was saved.
+    ///
+    /// Not read by `Worksheet::cells_lite` and
+    /// `reader::xlsx::read_sheet_by_name_stream`, which give the cells
+    /// without the workbook.
+    #[inline]
+    #[must_use]
+    pub fn dynamic_array(&self) -> bool {
+        self.dynamic_array
+    }
+
+    /// Makes the formula a dynamic array formula, or an ordinary one again.
+    /// A dynamic array formula is written as an array formula; without a
+    /// `reference()` its range is the cell itself, and Excel spills the
+    /// result when it calculates the workbook.
+    #[inline]
+    pub fn set_dynamic_array(&mut self, value: bool) -> &mut Self {
+        self.dynamic_array = value;
+        if !value {
+            self.dynamic_array_collapsed = false;
+        }
+        self
+    }
+
+    /// Whether the dynamic array is collapsed (`fCollapsed` of the dynamic
+    /// array properties).
+    #[inline]
+    #[must_use]
+    pub fn dynamic_array_collapsed(&self) -> bool {
+        self.dynamic_array_collapsed
+    }
+
+    #[inline]
+    pub fn set_dynamic_array_collapsed(&mut self, value: bool) -> &mut Self {
+        self.dynamic_array_collapsed = value;
+        self
+    }
+
+    /// Moves the range the formula fills (`ref` of an array or data table
+    /// formula) with its cell, as rows and columns are inserted.
+    pub(crate) fn adjustment_insert_reference(
+        &mut self,
+        root_col_num: u32,
+        offset_col_num: u32,
+        root_row_num: u32,
+        offset_row_num: u32,
+    ) {
+        self.adjust_reference(|range| {
+            range.adjustment_insert_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        });
+    }
+
+    /// Moves the range the formula fills with its cell, as rows and columns
+    /// are removed.
+    pub(crate) fn adjustment_remove_reference(
+        &mut self,
+        root_col_num: u32,
+        offset_col_num: u32,
+        root_row_num: u32,
+        offset_row_num: u32,
+    ) {
+        self.adjust_reference(|range| {
+            range.adjustment_remove_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        });
+    }
+
+    fn adjust_reference(&mut self, adjust: impl FnOnce(&mut Range)) {
+        let reference = self.reference.value_str();
+        if reference.is_empty() || reference.split(':').count() > 2 {
+            return;
+        }
+        let mut range = Range::default();
+        range.set_range(reference);
+        adjust(&mut range);
+        self.reference.set_value(range.range());
+    }
+
+    /// Whether the formula is written as an array formula (`t="array"`).
+    #[inline]
+    pub(crate) fn is_array(&self) -> bool {
+        self.dynamic_array() || self.formula_type.value() == &CellFormulaValues::Array
+    }
+
     #[inline]
     #[must_use]
     pub fn bx(&self) -> bool {
@@ -371,12 +476,13 @@ impl CellFormula {
             attributes.push(("dtr", data_table_row_str).into());
         }
 
+        // A dynamic array formula is an array formula too.
+        let is_array = self.is_array();
         let formula_type_str = self.formula_type.value_string();
-        if self.formula_type.has_value() {
-            // Not SUPPORT Array
-            if self.formula_type.value() != &CellFormulaValues::Array {
-                attributes.push(("t", formula_type_str).into());
-            }
+        if is_array {
+            attributes.push(("t", CellFormulaValues::Array.value_string()).into());
+        } else if self.formula_type.has_value() {
+            attributes.push(("t", formula_type_str).into());
         }
 
         let input_1deleted_str = self.input_1deleted.value_string();
@@ -399,7 +505,23 @@ impl CellFormula {
 
         #[allow(unused_assignments)]
         let mut reference_str = String::new();
-        if let Some((start_col, end_col)) = formula_shared_list.get(&self.shared_index.value())
+        if is_array {
+            // The cells the formula fills: the cell itself when nothing
+            // else is known.
+            let reference = if self.reference.has_value() {
+                self.reference.value_str()
+            } else {
+                coordinate
+            };
+            attributes.push(("ref", reference).into());
+        } else if self.formula_type.value() == &CellFormulaValues::DataTable {
+            // A data table formula is only written in its first cell, and
+            // `ref` holds the range of cells it fills.
+            if self.reference.has_value() {
+                attributes.push(("ref", self.reference.value_str()).into());
+            }
+        } else if let Some((start_col, end_col)) =
+            formula_shared_list.get(&self.shared_index.value())
         {
             if coordinate == start_col {
                 reference_str = match end_col {

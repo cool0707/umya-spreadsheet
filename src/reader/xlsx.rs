@@ -12,6 +12,7 @@ use crate::{
         COMMENTS_NS,
         DRAWINGS_NS,
         PIVOT_TABLE_NS,
+        SHEET_METADATA_NS,
         TABLE_NS,
         THEME_NS,
         THREADED_COMMENT_NS,
@@ -19,6 +20,7 @@ use crate::{
     },
     structs::{
         Cell,
+        CellMetadata,
         SharedStringTable,
         Stylesheet,
         Workbook,
@@ -84,6 +86,15 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
         if type_value == THEME_NS {
             let theme = theme::read(&mut arv, rel_target)?;
             book.set_theme(theme);
+        }
+    }
+
+    // What the `cm` of the cells means (dynamic array formulas).
+    for (_, type_value, rel_target) in &workbook_rel {
+        if type_value == SHEET_METADATA_NS {
+            if let Ok(file) = driver::zip_by_name(&mut arv, &format!("xl/{rel_target}")) {
+                book.set_cell_metadata(CellMetadata::read(io::BufReader::new(file)));
+            }
         }
     }
 
@@ -184,6 +195,7 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
     worksheet: &mut Worksheet,
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &Stylesheet,
+    cell_metadata: &CellMetadata,
 ) {
     if worksheet.is_deserialized() {
         return;
@@ -198,6 +210,11 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
         stylesheet,
     )
     .unwrap();
+    if !cell_metadata.is_empty() {
+        for cell in worksheet.cells_crate_mut().collection_mut() {
+            cell.resolve_cell_metadata(cell_metadata);
+        }
+    }
     raw_data_of_worksheet
         .load_relationship_file_data_from_source()
         .unwrap();

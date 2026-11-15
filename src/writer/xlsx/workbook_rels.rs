@@ -25,6 +25,7 @@ use crate::{
         PKG_WORKBOOK_RELS,
         REL_NS,
         SHARED_STRINGS_NS,
+        SHEET_METADATA_NS,
         STYLES_NS,
         THEME_NS,
         VBA_PROJECT_NS,
@@ -39,6 +40,7 @@ use crate::{
 pub(crate) fn write<W: io::Seek + io::Write>(
     wb: &Workbook,
     has_shared_string_table: bool,
+    has_cell_metadata: bool,
     writer_mng: &mut WriterManager<W>,
 ) -> Result<(), XlsxError> {
     let is_light = writer_mng.get_is_light();
@@ -100,6 +102,18 @@ pub(crate) fn write<W: io::Seek + io::Write>(
             &index.to_string(),
             SHARED_STRINGS_NS,
             "sharedStrings.xml",
+            "",
+        );
+        index += 1;
+    }
+
+    // relationship metadata.xml
+    if has_cell_metadata {
+        write_relationship(
+            &mut writer,
+            &index.to_string(),
+            SHEET_METADATA_NS,
+            "metadata.xml",
             "",
         );
         index += 1;

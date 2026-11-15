@@ -43,6 +43,7 @@ use crate::{
     structs::{
         // SharedStringTable,
         // Stylesheet,
+        CellMetadata,
         Workbook,
         Worksheet,
         WriterManager,
@@ -60,6 +61,7 @@ use crate::{
         embeddings,
         jsa_project_bin,
         media,
+        metadata,
         person,
         pivot_cache,
         pivot_table,
@@ -92,6 +94,8 @@ pub struct StreamingWriter<W: io::Write + io::Seek> {
 
     available:  Vec<Worksheet>,
     stylesheet: Stylesheet,
+    // The cell metadata the cells written so far refer to.
+    cell_metadata: CellMetadata,
     has_macros: bool,
     sheet_no:   i32,
 }
@@ -107,6 +111,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
             work_book,
             available,
             stylesheet,
+            cell_metadata: CellMetadata::default(),
             has_macros,
             sheet_no: 0,
         }
@@ -134,6 +139,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
             &mut self.writer_manager,
         )?;
         styles::write(&self.stylesheet, &mut self.writer_manager)?;
+        let has_cell_metadata = metadata::write(&self.cell_metadata, &mut self.writer_manager)?;
         workbook::write(&self.work_book, &mut self.writer_manager)?;
 
         let has_shared_string_table = self
@@ -145,6 +151,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
         workbook_rels::write(
             &self.work_book,
             has_shared_string_table,
+            has_cell_metadata,
             &mut self.writer_manager,
         )?;
         content_types::write(&self.work_book, &mut self.writer_manager)?;
@@ -170,6 +177,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
             &worksheet,
             &self.work_book.shared_string_table(),
             &mut self.stylesheet,
+            &mut self.cell_metadata,
             self.has_macros,
             &mut self.writer_manager,
         )?;
