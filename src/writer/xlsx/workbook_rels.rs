@@ -163,6 +163,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         );
     }
 
+    // the parts kept as they were read (external links, slicer caches...)
+    for (id, rel_type, target) in wb.kept_relationships().write_parts(writer_mng)? {
+        write_relationship(&mut writer, id.trim_start_matches("rId"), &rel_type, &target, "");
+    }
+
     write_end_tag(&mut writer, root_tag_name);
     make_file_from_writer(
         PKG_WORKBOOK_RELS,

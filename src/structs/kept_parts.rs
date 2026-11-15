@@ -7,6 +7,10 @@
 //! The model of a chart of this crate (`ChartSpace`) leaves out much of what
 //! a chart has (and the kinds it does not know entirely), so a chart that was
 //! read is kept like this instead.
+//!
+//! The same for the parts the model has nothing for, which the workbook and
+//! its sheets refer to (`KeptRelationships`): external links, slicers and
+//! timelines with their caches, the properties of form controls, custom XML.
 
 use std::{
     collections::HashMap,
@@ -65,6 +69,20 @@ use crate::{
 /// How deep the parts a chart refers to are followed.
 const MAX_DEPTH: usize = 8;
 
+/// The folders of the parts kept as they were read (and what those refer to).
+const KEPT_FOLDERS: [&str; 10] = [
+    "xl/charts/",
+    "xl/pivotTables/",
+    "xl/pivotCache/",
+    "xl/externalLinks/",
+    "xl/slicerCaches/",
+    "xl/slicers/",
+    "xl/timelineCaches/",
+    "xl/timelines/",
+    "xl/ctrlProps/",
+    "customXml/",
+];
+
 /// The parts of the file read that the charts are made of: everything in
 /// `xl/charts/` and what those refer to, with their content types. Read when
 /// the workbook is opened, for the drawings of the sheets (which may be read
@@ -85,8 +103,10 @@ impl PartStore {
         let charts: Vec<String> = arv
             .file_names()
             .filter(|name| {
-                name.strip_prefix("xl/charts/").is_some_and(|rest| {
-                    !rest.contains('/') && extension(rest).eq_ignore_ascii_case("xml")
+                KEPT_FOLDERS.iter().any(|folder| {
+                    name.strip_prefix(folder).is_some_and(|rest| {
+                        !rest.contains('/') && extension(rest).eq_ignore_ascii_case("xml")
+                    })
                 })
             })
             .map(str::to_string)
@@ -231,7 +251,17 @@ impl KeptPart {
         &self,
         writer_mng: &mut WriterManager<W>,
     ) -> Result<String, XlsxError> {
+        // A pivot cache is the workbook's and its pivot tables': written once.
+        let shared = self.path.starts_with("xl/pivotCache/");
+        if shared {
+            if let Some(written) = writer_mng.shared_part(&self.path) {
+                return Ok(written.to_string());
+            }
+        }
         let path = free_name(writer_mng, &self.path);
+        if shared {
+            writer_mng.set_shared_part(&self.path, &path);
+        }
         writer_mng.add_bin(&path, &self.data)?;
         writer_mng.add_content_type(&path, &self.content_type);
         if self.relationships.is_empty() {
@@ -297,6 +327,128 @@ impl KeptPart {
     pub(crate) fn data(&self) -> &[u8] {
         &self.data
     }
+}
+
+/// Relationships of the workbook or of a sheet to parts the model has
+/// nothing for (external links, slicers and timelines with their caches, the
+/// properties of form controls, custom XML), kept with those parts, and the
+/// elements of the workbook or sheet that refer to them (`externalReferences`,
+/// `extLst`, `controls`...) as they were read. They are written back with ids
+/// of their own (`rIdKept1`...), which take the place of the ids read in the
+/// elements kept.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct KeptRelationships {
+    /// (id read, type, the part).
+    list: Vec<(String, String, KeptPart)>,
+    /// (name of the element, its XML as read).
+    xml:  Vec<(String, String)>,
+    /// The namespaces the root of the part read declared (`xmlns:xr2`...):
+    /// the elements kept may use them.
+    namespaces: Vec<(String, String)>,
+}
+
+impl KeptRelationships {
+    /// Whether the model leaves relationships of this type out (they are
+    /// kept instead).
+    pub(crate) fn is_kept_type(rel_type: &str) -> bool {
+        matches!(
+            rel_type.rsplit('/').next(),
+            Some(
+                "externalLink" | "slicerCache" | "timelineCache" | "customXml" | "slicer" | "timeline" | "ctrlProp"
+                    | "pivotTable" | "pivotCacheDefinition"
+            )
+        )
+    }
+
+    /// Keeps the relationship `id` to the part at `path` (in the package),
+    /// when the store has it.
+    pub(crate) fn add(&mut self, store: &PartStore, id: &str, rel_type: &str, path: &str) {
+        if let Some(part) = store.part(path) {
+            self.list.push((id.to_string(), rel_type.to_string(), part));
+        }
+    }
+
+    /// Remembers the namespaces the root element `e` declares, but the
+    /// default one (the kept elements are in the same).
+    pub(crate) fn set_namespaces(&mut self, e: &quick_xml::events::BytesStart<'_>) {
+        self.namespaces = root_namespaces(e);
+    }
+
+    pub(crate) fn add_xml(&mut self, name: &str, xml: String) {
+        self.xml.push((name.to_string(), xml));
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.list.is_empty() && self.xml.is_empty()
+    }
+
+    /// The id a relationship kept is written with.
+    fn new_id(n: usize) -> String {
+        format!("rIdKept{}", n + 1)
+    }
+
+    /// The elements kept with this name, with the ids they are written with.
+    pub(crate) fn xml(&self, name: &str) -> Vec<String> {
+        self.xml
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, xml)| {
+                let mut xml = self.with_namespaces(xml);
+                for (n, (id, _, _)) in self.list.iter().enumerate() {
+                    xml = xml.replace(&format!("r:id=\"{id}\""), &format!("r:id=\"{}\"", Self::new_id(n)));
+                }
+                xml
+            })
+            .collect()
+    }
+
+    fn with_namespaces(&self, xml: &str) -> String {
+        declare_namespaces(xml, &self.namespaces)
+    }
+
+    /// Writes the parts; returns the relationships to write: (id, type,
+    /// target).
+    pub(crate) fn write_parts<W: io::Seek + io::Write>(
+        &self,
+        writer_mng: &mut WriterManager<W>,
+    ) -> Result<Vec<(String, String, String)>, XlsxError> {
+        let mut out = Vec::with_capacity(self.list.len());
+        for (n, (_, rel_type, part)) in self.list.iter().enumerate() {
+            let path = part.write(writer_mng)?;
+            out.push((Self::new_id(n), rel_type.clone(), format!("/{path}")));
+        }
+        Ok(out)
+    }
+}
+
+/// The namespaces (`xmlns:xr9`...) a root element declares, but the default one.
+pub(crate) fn root_namespaces(e: &quick_xml::events::BytesStart<'_>) -> Vec<(String, String)> {
+    e.attributes()
+        .with_checks(false)
+        .flatten()
+        .filter(|a| a.key.as_ref().starts_with(b"xmlns:"))
+        .map(|a| (String::from_utf8_lossy(a.key.as_ref()).to_string(), String::from_utf8_lossy(&a.value).to_string()))
+        .collect()
+}
+
+/// An element kept as read (`xml`), declaring the namespaces of the root it
+/// was read in that it uses and does not declare itself, for it to stand
+/// alone in the part written.
+pub(crate) fn declare_namespaces(xml: &str, namespaces: &[(String, String)]) -> String {
+    let Some(end) = xml.find('>') else { return xml.to_string() };
+    let end = if xml[..end].ends_with('/') { end - 1 } else { end };
+    let (tag, rest) = xml.split_at(end);
+    let mut out = tag.to_string();
+    for (key, value) in namespaces {
+        let prefix = &key["xmlns:".len()..];
+        // As the prefix of an element or attribute, or named in an attribute (mc:Choice Requires="x14").
+        let used = xml.contains(&format!("<{prefix}:")) || xml.contains(&format!(" {prefix}:")) || xml.contains(&format!("\"{prefix}\""));
+        if used && !tag.contains(&format!("{key}=")) {
+            out.push_str(&format!(" {key}=\"{value}\""));
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Rows and columns inserted or removed: from `root_col` / `root_row`

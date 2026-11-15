@@ -57,6 +57,7 @@ pub struct Workbook {
     cell_metadata:         CellMetadata,
     rich_data:             RichData,
     chart_parts:           PartStore,
+    kept_relationships:    crate::structs::KeptRelationships,
 }
 
 impl Workbook {
@@ -1105,6 +1106,18 @@ impl Workbook {
     pub(crate) fn set_rich_data(&mut self, value: RichData) -> &mut Self {
         self.rich_data = value;
         self
+    }
+
+    /// The relationships to parts the model has nothing for, kept with those
+    /// parts and the elements that refer to them.
+    #[inline]
+    pub(crate) fn kept_relationships(&self) -> &crate::structs::KeptRelationships {
+        &self.kept_relationships
+    }
+
+    #[inline]
+    pub(crate) fn kept_relationships_mut(&mut self) -> &mut crate::structs::KeptRelationships {
+        &mut self.kept_relationships
     }
 
     /// The parts of the file read that its charts are made of, for the

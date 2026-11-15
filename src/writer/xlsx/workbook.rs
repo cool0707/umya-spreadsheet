@@ -128,6 +128,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     }
     write_end_tag(&mut writer, "sheets");
 
+    // externalReferences (kept as read, with the external links)
+    for xml in wb.kept_relationships().xml("externalReferences") {
+        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
+    }
+
     // definedNames
     if wb.has_defined_names() {
         write_start_tag(&mut writer, "definedNames", vec![], false);
@@ -162,6 +167,16 @@ pub(crate) fn write<W: io::Seek + io::Write>(
             index += 1;
         }
         write_end_tag(&mut writer, "pivotCaches");
+    }
+
+    // pivotCaches (kept as read, with the pivot tables)
+    for xml in wb.kept_relationships().xml("pivotCaches") {
+        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
+    }
+
+    // extLst (kept as read: slicer and timeline caches, ...)
+    for xml in wb.kept_relationships().xml("extLst") {
+        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
     }
 
     write_end_tag(&mut writer, "workbook");

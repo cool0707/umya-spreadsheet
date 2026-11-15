@@ -8,13 +8,15 @@ use quick_xml::{
 };
 
 use crate::{
-    reader::driver::get_attribute,
+    reader::driver::get_attribute_value,
     writer::driver::write_start_tag,
 };
 
 #[derive(Clone, Default, Debug)]
 pub struct PictureLocks {
     no_change_aspect: bool,
+    /// The other locks (`noGrp`, `noCrop`...), as read.
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 
 impl PictureLocks {
@@ -43,22 +45,25 @@ impl PictureLocks {
         _reader: &mut Reader<R>,
         e: &BytesStart,
     ) {
-        if let Some(v) = get_attribute(e, b"noChangeAspect") {
-            if v == "1" {
-                self.set_no_change_aspect(true);
+        for attr in e.attributes().with_checks(false).flatten() {
+            let value = get_attribute_value(&attr).unwrap();
+            match attr.key.into_inner() {
+                b"noChangeAspect" => self.no_change_aspect = value == "1" || value == "true",
+                key => self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into())),
             }
         }
     }
 
     #[inline]
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        // a:picLocks
-        let no_change_aspect = if self.no_change_aspect { "1" } else { "2" };
-        write_start_tag(
-            writer,
-            "a:picLocks",
-            vec![("noChangeAspect", no_change_aspect).into()],
-            true,
-        );
+        // a:picLocks (a boolean: "2" does not open in Excel)
+        let mut attributes: crate::structs::AttrCollection = Vec::new();
+        if self.no_change_aspect {
+            attributes.push(("noChangeAspect", "1").into());
+        }
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
+        }
+        write_start_tag(writer, "a:picLocks", attributes, true);
     }
 }

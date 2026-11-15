@@ -17,16 +17,19 @@ use quick_xml::{
 };
 
 use super::{
-    PhoneticRun,
     RichText,
     Text,
     TextElement,
 };
 use crate::{
-    reader::driver::xml_read_loop,
+    reader::driver::{
+        read_raw_element,
+        xml_read_loop,
+    },
     writer::driver::{
         write_end_tag,
         write_start_tag,
+        write_text_node_no_escape,
     },
 };
 
@@ -34,6 +37,8 @@ use crate::{
 pub(crate) struct SharedStringItem {
     text:      Option<Text>,
     rich_text: Option<RichText>,
+    /// The furigana (`rPh`) and `phoneticPr`, as read.
+    phonetic:  Option<Box<str>>,
 }
 
 impl SharedStringItem {
@@ -107,10 +112,32 @@ impl SharedStringItem {
         self
     }
 
+    /// The furigana (`<rPh>...</rPh><phoneticPr .../>`) as the file has them.
+    #[inline]
+    pub(crate) fn phonetic(&self) -> Option<&str> {
+        self.phonetic.as_deref()
+    }
+
+    #[inline]
+    pub(crate) fn set_phonetic(&mut self, value: Option<&str>) -> &mut Self {
+        self.phonetic = value.map(Into::into);
+        self
+    }
+
+    /// The text of the item, as a cell shows it.
+    pub(crate) fn plain_text(&self) -> String {
+        match (&self.text, &self.rich_text) {
+            (_, Some(r)) => r.text().to_string(),
+            (Some(t), None) => t.value().to_string(),
+            _ => String::new(),
+        }
+    }
+
     pub(crate) fn hash_u64(&self) -> u64 {
         let mut h = DefaultHasher::default();
         let content = format!(
-            "{}{}",
+            "{}{}{}",
+            self.phonetic.as_deref().unwrap_or(""),
             self.text
                 .as_ref()
                 .map_or(String::from("NONE"), Text::hash_code),
@@ -139,9 +166,15 @@ impl SharedStringItem {
     /// content model) up to the closing `end` tag.
     pub(crate) fn read_until<R: std::io::BufRead>(&mut self, reader: &mut Reader<R>, end: &[u8]) {
         let mut vec_text_element: Vec<TextElement> = Vec::new();
+        let mut phonetic = String::new();
 
         xml_read_loop!(
             reader,
+            Event::Empty(ref e) => {
+                if e.name().into_inner() == b"phoneticPr" {
+                    phonetic.push_str(&read_raw_element(reader, e, true));
+                }
+            },
             Event::Start(ref e) => {
                 match e.name().into_inner() {
                     b"t" => {
@@ -154,14 +187,18 @@ impl SharedStringItem {
                         obj.set_attributes(reader, e);
                         vec_text_element.push(obj);
                     }
-                    b"rPh" => {
-                        PhoneticRun::set_attributes(reader, e);
+                    b"rPh" | b"phoneticPr" => {
+                        phonetic.push_str(&read_raw_element(reader, e, false));
                     }
                     _ => (),
                 }
             },
             Event::End(ref e) => {
                 if e.name().into_inner() == end {
+                    // Only the default without furigana: as if there were none.
+                    if phonetic.contains("<rPh") {
+                        self.phonetic = Some(phonetic.into());
+                    }
                     if !vec_text_element.is_empty() {
                         let mut obj = RichText::default();
                         obj.set_rich_text_elements(vec_text_element);
@@ -188,7 +225,12 @@ impl SharedStringItem {
             v.write_to(writer);
         }
 
-        write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true);
+        // rPh, phoneticPr
+        if let Some(v) = &self.phonetic {
+            write_text_node_no_escape(writer, &**v);
+        } else {
+            write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true);
+        }
 
         write_end_tag(writer, "si");
     }

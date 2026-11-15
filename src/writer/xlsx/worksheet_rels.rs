@@ -220,6 +220,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         );
     }
 
+    // the parts kept as they were read (slicers, timelines, form controls...)
+    for (id, rel_type, target) in worksheet.kept_relationships().write_parts(writer_mng)? {
+        is_write = write_relationship(&mut writer, id.trim_start_matches("rId"), &rel_type, &target, "");
+    }
+
     write_end_tag(&mut writer, "Relationships");
 
     if is_write {

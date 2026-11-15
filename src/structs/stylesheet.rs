@@ -49,6 +49,12 @@ pub(crate) struct Stylesheet {
     differential_formats: DifferentialFormats,
     colors:               Colors,
     maked_style_list:     Vec<Style>,
+    /// `tableStyles` (the table and pivot styles of the workbook's own, with
+    /// the defaults) as read: their elements refer to the dxfs read, which
+    /// keep their places.
+    kept_table_styles:    Option<Box<str>>,
+    /// `extLst` (slicer and timeline styles and their dxfs) as read.
+    kept_ext_list:        Option<Box<str>>,
 }
 
 impl Stylesheet {
@@ -529,14 +535,27 @@ impl Stylesheet {
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
-        _e: &BytesStart,
+        e: &BytesStart,
     ) {
         self.numbering_formats.build_in_formats();
+        let namespaces = crate::structs::kept_parts::root_namespaces(e);
+        let keep = |xml: String| -> Option<Box<str>> { Some(crate::structs::kept_parts::declare_namespaces(&xml, &namespaces).into()) };
 
         xml_read_loop!(
             reader,
+            Event::Empty(ref e) => {
+                if e.name().into_inner() == b"tableStyles" {
+                    self.kept_table_styles = keep(crate::reader::driver::read_raw_element(reader, e, true));
+                }
+            },
             Event::Start(ref e) => {
                 match e.name().into_inner() {
+                    b"tableStyles" => {
+                        self.kept_table_styles = keep(crate::reader::driver::read_raw_element(reader, e, false));
+                    }
+                    b"extLst" => {
+                        self.kept_ext_list = keep(crate::reader::driver::read_raw_element(reader, e, false));
+                    }
                     b"numFmts" => {
                         self.numbering_formats.set_attributes(reader, e);
                     }
@@ -616,6 +635,16 @@ impl Stylesheet {
 
         // colors
         self.colors.write_to(writer);
+
+        // tableStyles, extLst (as read)
+        if let Some(table_styles) = &self.kept_table_styles {
+            crate::writer::driver::write_text_node_no_escape(writer, &**table_styles);
+            if let Some(ext) = &self.kept_ext_list {
+                crate::writer::driver::write_text_node_no_escape(writer, &**ext);
+            }
+            write_end_tag(writer, "styleSheet");
+            return;
+        }
 
         // tableStyles
         write_start_tag(

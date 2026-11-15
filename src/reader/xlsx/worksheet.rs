@@ -156,6 +156,24 @@ fn read_from_reader<R: io::BufRead>(
                 obj.set_attributes(&mut reader, e, stylesheet.differential_formats());
                 worksheet.add_conditional_formatting_collection(obj);
             }
+            b"worksheet" => {
+                worksheet.kept_relationships_mut().set_namespaces(e);
+            }
+            b"controls" => {
+                let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
+                worksheet.kept_relationships_mut().add_xml("controls", xml);
+            }
+            // An extension of the sheet the model does not read (sparklines,
+            // slicers, timelines...): kept as read. Those of conditional
+            // formats and data validations are read below.
+            b"ext" if !matches!(
+                get_attribute(e, b"uri").as_deref(),
+                Some("{78C0D931-6437-407d-A8EE-F0AAD7539E65}" | "{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}")
+            ) =>
+            {
+                let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
+                worksheet.kept_relationships_mut().add_xml("ext", xml);
+            }
             b"x14:conditionalFormattings" => {
                 for obj in ConditionalFormatting::read_x14_collection(
                     &mut reader,

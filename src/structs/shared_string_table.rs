@@ -80,6 +80,7 @@ impl SharedStringTable {
         if let Some(v) = value.rich_text() {
             shared_string_item.set_rich_text(v);
         }
+        shared_string_item.set_phonetic(value.phonetic());
 
         let hash_code = shared_string_item.hash_u64();
         let n = if let Some(v) = self.map.get(&hash_code) {

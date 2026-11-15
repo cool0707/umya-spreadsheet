@@ -206,6 +206,13 @@ impl Columns {
         if column.best_fit.value() {
             attributes.push(("bestFit", column.best_fit.value_string()).into());
         }
+        let outline_level = column.outline_level.value_string();
+        if column.outline_level.value() > 0 {
+            attributes.push(("outlineLevel", &outline_level).into());
+        }
+        if column.collapsed.value() {
+            attributes.push(("collapsed", "1").into());
+        }
         attributes.push(("customWidth", "1").into());
         let xf_index_str: String;
         let xf_index = stylesheet.set_style(column.style());

@@ -21,6 +21,9 @@ use crate::{
 pub struct CellValue {
     pub(crate) raw_value: CellRawValue,
     pub(crate) formula:   Option<Box<CellFormula>>,
+    /// The furigana of the shared string read, with the text they are of:
+    /// written back while the cell still has that text.
+    pub(crate) phonetic:  Option<(Box<str>, Box<str>)>,
 }
 impl CellValue {
     #[inline]
@@ -353,7 +356,19 @@ impl CellValue {
         if let Some(v) = value.rich_text() {
             self.set_rich_text(v.clone());
         }
+        self.phonetic = value.phonetic().map(|p| (value.plain_text().into(), p.into()));
         self
+    }
+
+    /// The furigana read for the cell, while it has the text they are of.
+    pub(crate) fn phonetic(&self) -> Option<&str> {
+        let (text, raw) = self.phonetic.as_ref()?;
+        let now = match &self.raw_value {
+            CellRawValue::String(s) => s.to_string(),
+            CellRawValue::RichText(r) => r.text().to_string(),
+            _ => return None,
+        };
+        (now == **text).then_some(&**raw)
     }
 
     /// xlsx can't store NaN or infinity as a number, so they become `#NUM!`

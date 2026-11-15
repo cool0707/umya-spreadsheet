@@ -67,6 +67,14 @@ pub(crate) fn read<R: io::Read + io::Seek>(
                     let r_id = get_attribute(e, b"r:id").unwrap();
                     wb.add_pivot_caches((r_id, cache_id, String::new()));
                 }
+                b"workbook" => {
+                    wb.kept_relationships_mut().set_namespaces(e);
+                }
+                b"externalReferences" | b"extLst" | b"pivotCaches" if !is_empty => {
+                    let name = String::from_utf8_lossy(e.name().into_inner()).to_string();
+                    let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
+                    wb.kept_relationships_mut().add_xml(&name, xml);
+                }
                 b"definedName" => {
                     let mut obj = DefinedName::default();
                     obj.set_attributes(&mut reader, e);

@@ -14,6 +14,7 @@ use quick_xml::{
 
 use super::{
     BooleanValue,
+    ByteValue,
     Cell,
     Cells,
     DoubleValue,
@@ -42,6 +43,8 @@ pub struct Row {
     thick_bot:     BooleanValue,
     custom_height: BooleanValue,
     hidden:        BooleanValue,
+    outline_level: ByteValue,
+    collapsed:     BooleanValue,
     style:         Box<Style>,
 }
 impl Default for Row {
@@ -55,6 +58,8 @@ impl Default for Row {
             thick_bot:     BooleanValue::default(),
             custom_height: BooleanValue::default(),
             hidden:        BooleanValue::default(),
+            outline_level: ByteValue::default(),
+            collapsed:     BooleanValue::default(),
             style:         Box::new(Style::default()),
         }
     }
@@ -194,6 +199,32 @@ impl Row {
         self
     }
 
+    /// The level of the group (outline) it is in: 0 for none, up to 7.
+    #[inline]
+    #[must_use]
+    pub fn outline_level(&self) -> u8 {
+        self.outline_level.value()
+    }
+
+    #[inline]
+    pub fn set_outline_level(&mut self, value: u8) -> &mut Self {
+        self.outline_level.set_value(value);
+        self
+    }
+
+    /// Whether the group it ends is collapsed.
+    #[inline]
+    #[must_use]
+    pub fn collapsed(&self) -> bool {
+        self.collapsed.value()
+    }
+
+    #[inline]
+    pub fn set_collapsed(&mut self, value: bool) -> &mut Self {
+        self.collapsed.set_value(value);
+        self
+    }
+
     #[inline]
     #[must_use]
     pub fn style(&self) -> &Style {
@@ -246,6 +277,8 @@ impl Row {
         set_string_from_xml!(self, e, thick_bot, "thickBot");
         set_string_from_xml!(self, e, custom_height, "customHeight");
         set_string_from_xml!(self, e, hidden, "hidden");
+        set_string_from_xml!(self, e, outline_level, "outlineLevel");
+        set_string_from_xml!(self, e, collapsed, "collapsed");
 
         if let Some(v) = get_attribute(e, b"x14ac:dyDescent") {
             if !v.is_empty() {
@@ -336,6 +369,13 @@ impl Row {
         }
         if self.hidden.value() {
             attributes.push(("hidden", self.hidden.value_string()).into());
+        }
+        let outline_level = self.outline_level.value_string();
+        if self.outline_level.value() > 0 {
+            attributes.push(("outlineLevel", &outline_level).into());
+        }
+        if self.collapsed.value() {
+            attributes.push(("collapsed", "1").into());
         }
         let descent = self.descent.value_string();
         if self.descent.has_value() {

@@ -30,12 +30,16 @@ use crate::structs::{
     raw::RawRelationships,
 };
 
-/// The `uri` of the `a:graphicData` of a chart, and of a chart of the newer
+/// The `uri` of the `a:graphicData` of a chart, of a chart of the newer
 /// kinds (chartEx: waterfall, treemap, sunburst, histogram, box and whisker,
-/// funnel, map).
-const CHART_URIS: [&[u8]; 2] = [
+/// funnel, map), and of the frames of slicers (of a pivot table, of a table)
+/// and timelines, which the model has no part for either.
+const CHART_URIS: [&[u8]; 5] = [
     b"http://schemas.openxmlformats.org/drawingml/2006/chart",
     b"http://schemas.microsoft.com/office/drawing/2014/chartex",
+    b"http://schemas.microsoft.com/office/drawing/2010/slicer",
+    b"http://schemas.microsoft.com/office/drawing/2012/slicer",
+    b"http://schemas.microsoft.com/office/drawing/2012/timeslicer",
 ];
 
 /// What stands for the `n`-th relationship in the XML kept: replaced by the

@@ -54,6 +54,9 @@ pub struct WriterManager<W: io::Seek + io::Write> {
     pivot_cache_hash_list: Vec<String>,
     /// Content types of parts written as they were read: part name -> type.
     content_types:         Vec<(String, String)>,
+    /// Parts kept as read that more than one part refers to (a pivot cache:
+    /// the workbook and its pivot tables): name read -> name written.
+    shared_parts:          std::collections::HashMap<String, String>,
 }
 
 impl<W: io::Seek + io::Write> WriterManager<W> {
@@ -67,7 +70,19 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
             pivot_table_no: 0,
             pivot_cache_hash_list: Vec::new(),
             content_types: Vec::new(),
+            shared_parts: std::collections::HashMap::new(),
         }
+    }
+
+    /// The name a shared part read as `path` was written under, if it was.
+    #[inline]
+    pub(crate) fn shared_part(&self, path: &str) -> Option<&str> {
+        self.shared_parts.get(path).map(String::as_str)
+    }
+
+    #[inline]
+    pub(crate) fn set_shared_part(&mut self, path: &str, written: &str) {
+        self.shared_parts.insert(path.to_string(), written.to_string());
     }
 
     #[inline]

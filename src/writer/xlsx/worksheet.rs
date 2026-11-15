@@ -326,7 +326,8 @@ fn write_worksheet_extensions(writer: &mut InternalWriter, worksheet: &Worksheet
     write_tables_and_objects(writer, worksheet, r_id);
 
     let cf2010 = worksheet.conditional_formatting_2010_collection();
-    if worksheet.data_validations_2010().is_some() || !cf2010.is_empty() {
+    let kept = worksheet.kept_relationships().xml("ext");
+    if worksheet.data_validations_2010().is_some() || !cf2010.is_empty() || !kept.is_empty() {
         write_start_tag(writer, "extLst", vec![], false);
         if !cf2010.is_empty() {
             write_start_tag(
@@ -347,6 +348,10 @@ fn write_worksheet_extensions(writer: &mut InternalWriter, worksheet: &Worksheet
         }
         if let Some(v) = worksheet.data_validations_2010() {
             v.write_to(writer);
+        }
+        // the extensions kept as read (sparklines, slicers, timelines...)
+        for xml in kept {
+            crate::writer::driver::write_text_node_no_escape(writer, xml);
         }
         write_end_tag(writer, "extLst");
     }
@@ -547,6 +552,19 @@ fn write_drawings(writer: &mut InternalWriter, worksheet: &Worksheet, mut r_id: 
 /// * `worksheet` - The worksheet containing tables and objects
 /// * `r_id` - The current relationship ID
 fn write_tables_and_objects(writer: &mut InternalWriter, worksheet: &Worksheet, mut r_id: i32) {
+    // In the order of the schema: oleObjects, controls, tableParts (the ids
+    // as before: the tables first).
+    let tables = if worksheet.has_table() { worksheet.tables().len() } else { 0 };
+    let ole_id = 1000 + 25;
+    worksheet
+        .ole_objects()
+        .write_to(writer, num_traits::cast(r_id + i32::try_from(tables).unwrap()).unwrap(), ole_id);
+
+    // controls (form controls, kept as read)
+    for xml in worksheet.kept_relationships().xml("controls") {
+        crate::writer::driver::write_text_node_no_escape(writer, xml);
+    }
+
     if worksheet.has_table() {
         let tables = worksheet.tables();
         write_start_tag(
@@ -562,11 +580,6 @@ fn write_tables_and_objects(writer: &mut InternalWriter, worksheet: &Worksheet, 
         }
         write_end_tag(writer, "tableParts");
     }
-
-    let ole_id = 1000 + 25;
-    worksheet
-        .ole_objects()
-        .write_to(writer, num_traits::cast(r_id).unwrap(), ole_id);
 }
 
 #[cfg(test)]

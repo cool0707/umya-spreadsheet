@@ -32,6 +32,9 @@ pub struct PageSetup {
     horizontal_dpi: UInt32Value,
     vertical_dpi:   UInt32Value,
     object_data:    Option<Vec<u8>>,
+    /// The attributes not modelled above (`blackAndWhite`, `firstPageNumber`,
+    /// `useFirstPageNumber`, `pageOrder`, `cellComments`, `errors`...), as read.
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 
 impl PageSetup {
@@ -239,6 +242,7 @@ impl PageSetup {
             || self.horizontal_dpi.has_value()
             || self.vertical_dpi.has_value()
             || self.object_data.is_some()
+            || !self.other_attributes.is_empty()
     }
 
     pub(crate) fn set_attributes<R: std::io::BufRead>(
@@ -254,6 +258,16 @@ impl PageSetup {
         set_string_from_xml!(self, e, fit_to_width, "fitToWidth");
         set_string_from_xml!(self, e, horizontal_dpi, "horizontalDpi");
         set_string_from_xml!(self, e, vertical_dpi, "verticalDpi");
+        for attr in e.attributes().with_checks(false).flatten() {
+            let key = attr.key.into_inner();
+            if !matches!(
+                key,
+                b"paperSize" | b"orientation" | b"scale" | b"fitToHeight" | b"fitToWidth" | b"horizontalDpi" | b"verticalDpi" | b"r:id"
+            ) {
+                let value = crate::reader::driver::get_attribute_value(&attr).unwrap();
+                self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into()));
+            }
+        }
 
         if let Some(r_id) = get_attribute(e, b"r:id") {
             let attached_file = relationships
@@ -296,6 +310,9 @@ impl PageSetup {
             let vertical_dpi = self.vertical_dpi.value_string();
             if self.vertical_dpi.has_value() {
                 attributes.push(("verticalDpi", &vertical_dpi).into());
+            }
+            for (k, v) in &self.other_attributes {
+                attributes.push((&**k, &**v).into());
             }
             if self.object_data.is_some() {
                 attributes.push(("r:id", &r_id_str).into());

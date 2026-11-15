@@ -66,6 +66,8 @@ pub struct Cell {
     hyperlink:             Option<Box<Hyperlink>>,
     cell_meta_index:       UInt32Value,
     value_meta_index:      UInt32Value,
+    /// Whether its furigana are shown (`ph`).
+    show_phonetic:         crate::BooleanValue,
 }
 impl Cell {
     #[inline]
@@ -250,6 +252,19 @@ impl Cell {
     #[must_use]
     pub fn value_meta_index(&self) -> u32 {
         self.value_meta_index.value()
+    }
+
+    /// Whether the furigana of the text are shown (Excel's "show phonetic field").
+    #[inline]
+    #[must_use]
+    pub fn show_phonetic(&self) -> bool {
+        self.show_phonetic.value()
+    }
+
+    #[inline]
+    pub fn set_show_phonetic(&mut self, value: bool) -> &mut Self {
+        self.show_phonetic.set_value(value);
+        self
     }
 
     /// Sets the value metadata of the cell (see [`Cell::value_meta_index`]);
@@ -619,6 +634,7 @@ impl Cell {
         self.style = cell.style;
         self.hyperlink = cell.hyperlink;
         self.value_meta_index = cell.value_meta_index;
+        self.show_phonetic = cell.show_phonetic;
         self
     }
 
@@ -652,6 +668,7 @@ impl Cell {
 
         set_string_from_xml!(self, e, cell_meta_index, "cm");
         set_string_from_xml!(self, e, value_meta_index, "vm");
+        set_string_from_xml!(self, e, show_phonetic, "ph");
 
         if empty_flag {
             return;
@@ -811,6 +828,10 @@ impl Cell {
         {
             value_meta_index_str = self.value_meta_index.value().to_string();
             attributes.push(("vm", &value_meta_index_str).into());
+        }
+
+        if self.show_phonetic.value() {
+            attributes.push(("ph", "1").into());
         }
 
         if empty_flag_value {

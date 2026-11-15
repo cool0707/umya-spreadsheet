@@ -5,6 +5,7 @@ use quick_xml::{
 
 use super::{
     BooleanValue,
+    ByteValue,
     DoubleValue,
     Style,
     Stylesheet,
@@ -40,6 +41,8 @@ pub struct Column {
     pub(crate) width:    DoubleValue,
     pub(crate) hidden:   BooleanValue,
     pub(crate) best_fit: BooleanValue,
+    pub(crate) outline_level: ByteValue,
+    pub(crate) collapsed: BooleanValue,
     style:               Box<Style>,
     auto_width:          BooleanValue,
 }
@@ -53,6 +56,8 @@ impl Default for Column {
             col_num: UInt32Value::default(),
             width,
             hidden: BooleanValue::default(),
+            outline_level: ByteValue::default(),
+            collapsed: BooleanValue::default(),
             best_fit: BooleanValue::default(),
             style: Box::new(Style::default()),
             auto_width: BooleanValue::default(),
@@ -115,6 +120,32 @@ impl Column {
     #[inline]
     pub fn set_hidden(&mut self, value: bool) -> &mut Self {
         self.hidden.set_value(value);
+        self
+    }
+
+    /// The level of the group (outline) it is in: 0 for none, up to 7.
+    #[inline]
+    #[must_use]
+    pub fn outline_level(&self) -> u8 {
+        self.outline_level.value()
+    }
+
+    #[inline]
+    pub fn set_outline_level(&mut self, value: u8) -> &mut Self {
+        self.outline_level.set_value(value);
+        self
+    }
+
+    /// Whether the group it ends is collapsed.
+    #[inline]
+    #[must_use]
+    pub fn collapsed(&self) -> bool {
+        self.collapsed.value()
+    }
+
+    #[inline]
+    pub fn set_collapsed(&mut self, value: bool) -> &mut Self {
+        self.collapsed.set_value(value);
         self
     }
 
@@ -224,10 +255,12 @@ impl Column {
     #[inline]
     pub(crate) fn hash_code(&self) -> String {
         crate::helper::utils::md5_hash(format!(
-            "{}{}{}",
+            "{}{}{}{}{}",
             self.width.value_string(),
             self.hidden.value_string(),
             self.best_fit.value_string(),
+            self.outline_level.value_string(),
+            self.collapsed.value_string(),
         ))
     }
 
@@ -246,6 +279,8 @@ impl Column {
         set_string_from_xml!(self, e, width, "width");
         set_string_from_xml!(self, e, hidden, "hidden");
         set_string_from_xml!(self, e, best_fit, "bestFit");
+        set_string_from_xml!(self, e, outline_level, "outlineLevel");
+        set_string_from_xml!(self, e, collapsed, "collapsed");
 
         if let Some(v) = get_attribute(e, b"style") {
             let style = stylesheet.style(v.parse::<usize>().unwrap());

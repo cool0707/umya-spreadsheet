@@ -82,6 +82,7 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 pub struct Worksheet {
     raw_data_of_worksheet:             Option<RawWorksheet>,
+    kept_relationships:                crate::structs::KeptRelationships,
     r_id:                              Box<str>,
     sheet_id:                          Box<str>,
     title:                             Box<str>,
@@ -2650,6 +2651,19 @@ impl Worksheet {
     pub(crate) fn is_deserialized(&self) -> bool {
         self.raw_data_of_worksheet.is_none()
     }
+
+    /// The relationships to parts the model has nothing for, kept with those
+    /// parts and the elements that refer to them.
+    #[inline]
+    pub(crate) fn kept_relationships(&self) -> &crate::structs::KeptRelationships {
+        &self.kept_relationships
+    }
+
+    #[inline]
+    pub(crate) fn kept_relationships_mut(&mut self) -> &mut crate::structs::KeptRelationships {
+        &mut self.kept_relationships
+    }
+
 
     #[inline]
     pub(crate) fn raw_data_of_worksheet(&self) -> &RawWorksheet {

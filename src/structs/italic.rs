@@ -56,6 +56,10 @@ impl Italic {
         // i
         if self.val.value() {
             write_start_tag(writer, "i", vec![], true);
+        } else if self.val.has_value() {
+            // Turned off on purpose (`<i val="0"/>`): in a differential
+            // format this takes it off what the cell has.
+            write_start_tag(writer, "i", vec![("val", "0").into()], true);
         }
     }
 }

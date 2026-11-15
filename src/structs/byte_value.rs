@@ -1,4 +1,4 @@
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ByteValue {
     value: Option<u8>,
 }

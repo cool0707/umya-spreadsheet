@@ -11,7 +11,6 @@ use crate::{
     helper::const_str::{
         COMMENTS_NS,
         DRAWINGS_NS,
-        PIVOT_TABLE_NS,
         SHEET_METADATA_NS,
         TABLE_NS,
         THEME_NS,
@@ -104,8 +103,16 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
     // What the `vm` of the cells refers to (pictures placed in cells).
     book.set_rich_data(RichData::read(&mut arv, &workbook_rel));
 
-    // What the charts of the drawings are made of.
-    book.set_chart_parts(PartStore::read(&mut arv));
+    // What the charts of the drawings are made of (and the other parts kept
+    // as they were read).
+    let store = PartStore::read(&mut arv);
+    for (id, rel_type, target) in &workbook_rel {
+        if crate::structs::KeptRelationships::is_kept_type(rel_type) {
+            let path = driver::join_paths("xl", target);
+            book.kept_relationships_mut().add(&store, id, rel_type, &path);
+        }
+    }
+    book.set_chart_parts(store);
 
     shared_strings::read(&mut arv, &mut book)?;
     styles::read(&mut arv, &mut book)?;
@@ -253,14 +260,13 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
                 TABLE_NS => {
                     table::read(worksheet, relationship.raw_file()).unwrap();
                 }
-                // pivot table, pivot cache
-                PIVOT_TABLE_NS => {
-                    pivot_table::read(
-                        worksheet,
-                        relationship.raw_file(),
-                        raw_data_of_worksheet.pivot_table_relationships(),
-                        raw_data_of_worksheet.pivot_cache_relationships(),
-                    );
+                rel_type if crate::structs::KeptRelationships::is_kept_type(rel_type) => {
+                    let sheet_path = raw_data_of_worksheet.worksheet_file().file_target();
+                    let dir = sheet_path.rsplit_once('/').map_or("", |(d, _)| d);
+                    let path = driver::join_paths(dir, relationship.target());
+                    worksheet
+                        .kept_relationships_mut()
+                        .add(chart_parts, relationship.id(), rel_type, &path);
                 }
                 _ => {}
             }

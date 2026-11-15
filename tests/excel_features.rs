@@ -1,0 +1,221 @@
+//! What a workbook made by Excel has besides its cells survives a round trip
+//! (found by opening the saved workbooks in Excel 2021).
+//!
+//! `excel_features.xlsx` was made by Excel 2021 (xljs
+//! `tools/excel-verify/excel-make-features.ps1`): a table with a style of its
+//! own, sparklines, a pivot table with a slicer and a timeline, a slicer of
+//! the table, form controls, data validations with messages, a note, sheet
+//! and workbook protection, hyperlinks, an external link, conditional
+//! formats, the page setup (black and white, print area), grouped rows,
+//! a picture, furigana, names, custom XML.
+use std::{
+    collections::{
+        BTreeMap,
+        BTreeSet,
+    },
+    io::{
+        Cursor,
+        Read,
+    },
+};
+
+use umya_spreadsheet::{
+    Workbook,
+    reader,
+    writer,
+};
+
+fn file(name: &str) -> Vec<u8> {
+    std::fs::read(format!("./tests/test_files/{name}")).unwrap()
+}
+
+fn write(book: &Workbook) -> Vec<u8> {
+    let mut out = Vec::new();
+    writer::xlsx::write_writer(book, &mut out).unwrap();
+    out
+}
+
+fn read(bytes: &[u8]) -> Workbook {
+    reader::xlsx::read_reader(Cursor::new(bytes), true).unwrap()
+}
+
+fn parts(file: &[u8]) -> BTreeMap<String, String> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(file)).unwrap();
+    let mut map = BTreeMap::new();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        map.insert(f.name().to_string(), String::from_utf8_lossy(&data).into_owned());
+    }
+    map
+}
+
+/// The name of a part without its numbers (`xl/slicers/slicer#.xml`).
+fn kind(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_ascii_digit() {
+            if !out.ends_with('#') {
+                out.push('#');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn all_text(p: &BTreeMap<String, String>, prefix: &str) -> String {
+    p.iter().filter(|(n, _)| n.starts_with(prefix)).map(|(_, d)| d.as_str()).collect()
+}
+
+/// The values of `attr="..."` in the text.
+fn values<'a>(text: &'a str, attr: &str) -> Vec<&'a str> {
+    let pat = format!(" {attr}=\"");
+    text.match_indices(&pat)
+        .map(|(i, _)| {
+            let rest = &text[i + pat.len()..];
+            &rest[..rest.find('"').unwrap()]
+        })
+        .collect()
+}
+
+fn rels_of(name: &str) -> String {
+    let (dir, file) = name.rsplit_once('/').unwrap_or(("", name));
+    if dir.is_empty() { format!("_rels/{file}.rels") } else { format!("{dir}/_rels/{file}.rels") }
+}
+
+#[test]
+fn what_excel_made_survives_a_round_trip() {
+    let src = file("excel_features.xlsx");
+    let before = parts(&src);
+    let saved = write(&read(&src));
+    let after = parts(&saved);
+
+    // No kind of part is lost, but the calculation chain (Excel makes it
+    // again) and the VML of the form controls (Excel 2010 and later read
+    // them from the sheet and the drawing).
+    let kinds = |p: &BTreeMap<String, String>| p.keys().map(|n| kind(n)).collect::<BTreeSet<_>>();
+    let lost: Vec<String> = kinds(&before)
+        .difference(&kinds(&after))
+        .filter(|k| !matches!(k.as_str(), "xl/calcChain.xml" | "xl/drawings/vmlDrawing#.vml"))
+        .cloned()
+        .collect();
+    assert!(lost.is_empty(), "lost: {lost:?}");
+    for kind_needed in [
+        "xl/externalLinks/externalLink#.xml",
+        "xl/externalLinks/_rels/externalLink#.xml.rels",
+        "xl/slicerCaches/slicerCache#.xml",
+        "xl/slicers/slicer#.xml",
+        "xl/timelineCaches/timelineCache#.xml",
+        "xl/timelines/timeline#.xml",
+        "xl/ctrlProps/ctrlProp#.xml",
+        "customXml/item#.xml",
+        "customXml/itemProps#.xml",
+        "xl/pivotTables/_rels/pivotTable#.xml.rels",
+        "xl/pivotCache/_rels/pivotCacheDefinition#.xml.rels",
+        "xl/pivotCache/pivotCacheRecords#.xml",
+    ] {
+        assert!(kinds(&after).contains(kind_needed), "{kind_needed}");
+    }
+    // One pivot cache, though the workbook and the pivot table both refer to it.
+    assert_eq!(after.keys().filter(|n| kind(n) == "xl/pivotCache/pivotCacheDefinition#.xml").count(), 1);
+
+    let sheets = all_text(&after, "xl/worksheets/sheet");
+    let workbook = &after["xl/workbook.xml"];
+    for (what, text, needle) in [
+        ("sparklines", &sheets, "<x14:sparklineGroups"),
+        ("slicers of the sheet", &sheets, "<x14:slicerList"),
+        ("timelines of the sheet", &sheets, "<x15:timelineRefs"),
+        ("form controls", &sheets, "<controls"),
+        ("grouped rows", &sheets, r#"outlineLevel="1""#),
+        ("furigana shown", &sheets, r#" ph="1""#),
+        ("black and white", &sheets, r#"blackAndWhite="1""#),
+        ("external link", workbook, "<externalReferences"),
+        ("pivot caches", workbook, "<pivotCaches"),
+        ("slicer caches", workbook, "slicerCaches"),
+        ("timeline caches", workbook, "<x15:timelineCacheRefs"),
+        ("furigana", &after["xl/sharedStrings.xml"], "<rPh"),
+        ("a table style of its own", &after["xl/styles.xml"], r#"<tableStyle name="独自の表""#),
+        ("the timeline style", &after["xl/styles.xml"], "<x15:timelineStyles"),
+    ] {
+        assert!(text.contains(needle), "{what}: {needle}");
+    }
+    assert!(!all_text(&after, "xl/drawings/").contains(r#"noChangeAspect="2""#));
+
+    // Every r:id refers to a relationship of its part.
+    for (name, data) in &after {
+        if !name.ends_with(".xml") || name.contains("_rels/") {
+            continue;
+        }
+        let ids = values(data, "r:id");
+        if ids.is_empty() {
+            continue;
+        }
+        let rels = after.get(&rels_of(name)).unwrap_or_else(|| panic!("no relationships for {name}"));
+        let have = values(rels, "Id");
+        for id in ids {
+            assert!(have.contains(&id), "{name}: r:id=\"{id}\" has no relationship");
+        }
+    }
+
+    // Every prefix used is declared (a kept element using xr2:uid needs it).
+    for (name, data) in &after {
+        if !name.ends_with(".xml") {
+            continue;
+        }
+        let declared: BTreeSet<&str> = data.match_indices("xmlns:").map(|(i, _)| {
+            let rest = &data[i + 6..];
+            &rest[..rest.find('=').unwrap()]
+        }).collect();
+        let mut used = BTreeSet::new();
+        for (i, _) in data.match_indices('<') {
+            let rest = &data[i + 1..];
+            let tag = rest.trim_start_matches('/');
+            let end = tag.find(|c: char| c.is_whitespace() || c == '>' || c == '/').unwrap_or(tag.len());
+            let tag = &tag[..end];
+            if let Some((prefix, _)) = tag.split_once(':') {
+                if !prefix.starts_with('?') && !prefix.starts_with('!') {
+                    used.insert(prefix.to_string());
+                }
+            }
+            // The prefixed attributes of the tag.
+            let close = rest.find('>').unwrap_or(rest.len());
+            for part in rest[..close].split_whitespace().skip(1) {
+                if let Some((prefix, _)) = part.split_once(':') {
+                    if prefix != "xmlns" && part.contains('=') && !prefix.contains('"') {
+                        used.insert(prefix.to_string());
+                    }
+                }
+            }
+        }
+        for prefix in used {
+            assert!(prefix == "xml" || declared.contains(prefix.as_str()), "{name}: {prefix}: is not declared");
+        }
+    }
+
+    // Writing again gives the same parts.
+    let again = parts(&write(&read(&saved)));
+    assert_eq!(kinds(&again), kinds(&after));
+}
+
+#[test]
+fn rows_and_columns_keep_their_groups() {
+    let mut book = umya_spreadsheet::new_file();
+    let sheet = book.sheet_mut(0).unwrap();
+    sheet.cell_mut("A3").set_value("x");
+    sheet.row_dimension_mut(2).set_outline_level(1).set_hidden(true);
+    sheet.row_dimension_mut(3).set_outline_level(2).set_collapsed(true);
+    sheet.column_dimension_mut("B").set_outline_level(1);
+    let bytes = write(&book);
+    let xml = &parts(&bytes)["xl/worksheets/sheet1.xml"];
+    assert!(xml.contains(r#"<row r="2" hidden="1" outlineLevel="1""#), "{xml}");
+    assert!(xml.contains(r#"outlineLevel="2" collapsed="1""#));
+    assert!(xml.contains(r#"outlineLevel="1"/>"#) || xml.contains(r#"outlineLevel="1" "#));
+    let book = read(&bytes);
+    let sheet = book.sheet(0).unwrap();
+    assert_eq!(sheet.row_dimension(3).unwrap().outline_level(), 2);
+    assert!(sheet.row_dimension(3).unwrap().collapsed());
+    assert_eq!(sheet.column_dimension("B").unwrap().outline_level(), 1);
+}
