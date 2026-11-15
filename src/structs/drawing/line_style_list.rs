@@ -67,10 +67,10 @@ impl LineStyleList {
     ) {
         xml_read_loop!(
             reader,
-            Event::Start(ref e) => {
+            ref n @ (Event::Empty(ref e) | Event::Start(ref e)) => {
                 if e.name().into_inner() == b"a:ln" {
                     let mut obj = Outline::default();
-                    obj.set_attributes(reader, e);
+                    obj.set_attributes(reader, e, matches!(n, Event::Empty(_)));
                     self.outline_collection.push(obj);
                 }
             },

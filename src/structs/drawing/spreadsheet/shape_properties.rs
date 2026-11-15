@@ -28,6 +28,7 @@ use crate::{
     },
     reader::driver::{
         get_attribute,
+        read_raw_element,
         set_string_from_xml,
         xml_read_loop,
     },
@@ -35,6 +36,7 @@ use crate::{
     writer::driver::{
         write_end_tag,
         write_start_tag,
+        write_text_node_no_escape,
     },
 };
 
@@ -42,6 +44,8 @@ use crate::{
 pub struct ShapeProperties {
     transform2d:      Option<Box<Transform2D>>,
     preset_geometry:  PresetGeometry,
+    /// `a:custGeom` (the path of a freeform), as read: the model has no part for it.
+    custom_geometry:  Option<Box<str>>,
     blip_fill:        Option<Box<BlipFill>>,
     solid_fill:       Option<Box<SolidFill>>,
     gradient_fill:    Option<Box<GradientFill>>,
@@ -359,7 +363,10 @@ impl ShapeProperties {
                         self.set_transform2d(obj);
                     }
                     b"a:prstGeom" => {
-                        self.preset_geometry.set_attributes(reader, e);
+                        self.preset_geometry.set_attributes(reader, e, false);
+                    }
+                    b"a:custGeom" => {
+                        self.custom_geometry = Some(read_raw_element(reader, e, false).into());
                     }
                     b"a:blipFill" => {
                         let mut obj = BlipFill::default();
@@ -373,7 +380,7 @@ impl ShapeProperties {
                     }
                     b"a:ln" => {
                         let mut outline = Outline::default();
-                        outline.set_attributes(reader, e);
+                        outline.set_attributes(reader, e, false);
                         self.set_outline(outline);
                     }
                     b"a:solidFill" => {
@@ -395,10 +402,22 @@ impl ShapeProperties {
                 }
             },
             Event::Empty(ref e) => {
-                if e.name().into_inner() == b"a:noFill" {
-                    let obj = NoFill::default();
-                    NoFill::set_attributes(reader, e, true);
-                    self.set_no_fill(obj);
+                match e.name().into_inner() {
+                    b"a:noFill" => {
+                        let obj = NoFill::default();
+                        NoFill::set_attributes(reader, e, true);
+                        self.set_no_fill(obj);
+                    }
+                    b"a:ln" => {
+                        let mut outline = Outline::default();
+                        outline.set_attributes(reader, e, true);
+                        self.set_outline(outline);
+                    }
+                    // `<a:prstGeom prst="rect"/>` (openpyxl and others write it so)
+                    b"a:prstGeom" => {
+                        self.preset_geometry.set_attributes(reader, e, true);
+                    }
+                    _ => (),
                 }
             },
             Event::End(ref e) => {
@@ -427,8 +446,12 @@ impl ShapeProperties {
             v.write_to(writer);
         }
 
-        // a:prstGeom
-        self.preset_geometry.write_to(writer);
+        // a:prstGeom (optional: an empty prst does not open in Excel)
+        if let Some(raw) = &self.custom_geometry {
+            write_text_node_no_escape(writer, &**raw);
+        } else if !self.preset_geometry.geometry().is_empty() {
+            self.preset_geometry.write_to(writer);
+        }
 
         // a:blipFill
         if let Some(v) = &self.blip_fill {

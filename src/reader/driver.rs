@@ -177,3 +177,37 @@ pub(crate) fn get_attribute(e: &quick_xml::events::BytesStart<'_>, key: &[u8]) -
 pub(crate) fn get_attribute_value(attr: &Attribute) -> Result<String, FromUtf8Error> {
     String::from_utf8(attr.value.to_vec())
 }
+
+/// The element `e` begins (with all it holds) as XML text, for a part of a
+/// file the model does not read but has to write back as it was. Reads up to
+/// its end tag; `empty`: `e` was `<x/>`.
+pub(crate) fn read_raw_element<R: io::BufRead>(
+    reader: &mut quick_xml::Reader<R>,
+    e: &quick_xml::events::BytesStart<'_>,
+    empty: bool,
+) -> String {
+    use quick_xml::events::Event;
+    let mut writer = quick_xml::Writer::new(Vec::new());
+    if empty {
+        writer.write_event(Event::Empty(e.borrow())).unwrap();
+        return String::from_utf8(writer.into_inner()).unwrap();
+    }
+    writer.write_event(Event::Start(e.borrow())).unwrap();
+    let mut depth = 1;
+    let mut buf = Vec::new();
+    loop {
+        let ev = reader.read_event_into(&mut buf).unwrap();
+        match &ev {
+            Event::Start(_) => depth += 1,
+            Event::End(_) => depth -= 1,
+            Event::Eof => panic!("Error: Could not find the end of {:?}", e.name()),
+            _ => {}
+        }
+        writer.write_event(ev).unwrap();
+        if depth == 0 {
+            break;
+        }
+        buf.clear();
+    }
+    String::from_utf8(writer.into_inner()).unwrap()
+}

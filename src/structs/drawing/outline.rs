@@ -405,6 +405,7 @@ impl Outline {
         &mut self,
         reader: &mut Reader<R>,
         e: &BytesStart,
+        empty_flag: bool,
     ) {
         if let Some(v) = get_attribute(e, b"w") {
             self.set_width(v.parse::<u32>().unwrap());
@@ -419,6 +420,12 @@ impl Outline {
         }
 
         set_string_from_xml!(self, e, alignment, "algn");
+
+        // `<a:ln w="0"/>`: reading on would take in what follows, up to the
+        // next shape's `</a:ln>`.
+        if empty_flag {
+            return;
+        }
 
         xml_read_loop!(
             reader,

@@ -356,6 +356,13 @@ impl Stylesheet {
             let id = cell_format.number_format_id();
             if let Some(obj) = self.numbering_formats.numbering_format().get(&id) {
                 style.set_numbering_format(obj.clone());
+            } else if id < 164 {
+                // A built-in format whose code depends on the language of Excel
+                // (5-8, 23-26, 41-43, 63-66...): keep the id, or every such style
+                // reads the same and they are merged into one when saving.
+                let mut obj = super::NumberingFormat::default();
+                obj.set_number_format_id_crate(id).set_format_code_crate("");
+                style.set_numbering_format(obj);
             }
         }
 

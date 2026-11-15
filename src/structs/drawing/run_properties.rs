@@ -537,7 +537,7 @@ impl RunProperties {
                 }
                 b"a:ln" => {
                     let mut obj = Outline::default();
-                    obj.set_attributes(reader, e);
+                    obj.set_attributes(reader, e, is_empty);
                     self.set_outline(obj);
                 }
                 b"a:gradFill" => {

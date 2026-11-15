@@ -57,7 +57,7 @@ impl Text {
         let mut buf = Vec::new();
         let text = reader
                     .read_text_into(e.name(), &mut buf).unwrap();
-        self.set_value(crate::helper::utils::unescape_xml_text(&text));
+        self.set_value(crate::helper::utils::unescape_ooxml_string(crate::helper::utils::unescape_xml_text(&text)));
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
@@ -69,7 +69,7 @@ impl Text {
             attributes.push(("xml:space", "preserve").into());
         }
         write_start_tag(writer, "t", attributes, false);
-        write_text_node(writer, &*self.value);
+        write_text_node(writer, crate::helper::utils::escape_ooxml_string(&self.value));
         write_end_tag(writer, "t");
     }
 }

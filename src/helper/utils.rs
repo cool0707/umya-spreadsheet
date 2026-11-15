@@ -14,8 +14,64 @@ pub(crate) fn md5_hash(input: impl AsRef<[u8]>) -> String {
     output
 }
 
+/// Whether `s` starts with an escape of a character, `_xHHHH_`.
+fn ooxml_escape_at(s: &str) -> Option<u32> {
+    let b = s.as_bytes();
+    if b.len() >= 7 && b.starts_with(b"_x") && b[6] == b'_' && b[2..6].iter().all(u8::is_ascii_hexdigit) {
+        u32::from_str_radix(&s[2..6], 16).ok()
+    } else {
+        None
+    }
+}
+
+/// A string of a cell as Excel writes it in the file: the characters XML
+/// cannot hold (U+0001...) as `_xHHHH_`, and text that already looks like
+/// such an escape with its `_` as `_x005F_`.
+pub(crate) fn escape_ooxml_string(s: &str) -> std::borrow::Cow<'_, str> {
+    let bad = |c: char| matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}');
+    if !s.contains(bad) && !s.contains("_x") {
+        return s.into();
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for (i, c) in s.char_indices() {
+        if bad(c) {
+            out.push_str(&format!("_x{:04X}_", c as u32));
+        } else if c == '_' && ooxml_escape_at(&s[i..]).is_some() {
+            out.push_str("_x005F_");
+        } else {
+            out.push(c);
+        }
+    }
+    out.into()
+}
+
+/// The string `escape_ooxml_string` wrote (and Excel writes): `_xHHHH_` back
+/// to the character.
+pub(crate) fn unescape_ooxml_string(s: String) -> String {
+    if !s.contains("_x") {
+        return s;
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        let rest = &s[i..];
+        if let Some(c) = ooxml_escape_at(rest).and_then(char::from_u32) {
+            out.push(c);
+            i += 7;
+            continue;
+        }
+        let c = rest.chars().next().unwrap();
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
 pub(crate) fn unescape_xml_text(e: &quick_xml::events::BytesText<'_>) -> String {
     let decoded = e.decode().unwrap();
+    // Line ends as XML reads them (and Excel does): a CR LF or a CR in the
+    // file is a LF. A CR written as `&#13;` or `_x000D_` stays.
+    let decoded = if decoded.contains('\r') { decoded.replace("\r\n", "\n").replace('\r', "\n").into() } else { decoded };
     let mut remaining = decoded.as_ref();
     let mut output = String::with_capacity(remaining.len());
     // read_text_into retains XML markup. CDATA contains literal characters,

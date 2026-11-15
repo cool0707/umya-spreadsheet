@@ -16,6 +16,7 @@ use super::{
         EnumValue,
         Int32Value,
     },
+    AdjustValueList,
     ShapeAutoFit,
     TextWrappingValues,
 };
@@ -45,6 +46,12 @@ pub struct BodyProperties {
     bottom_inset:          Int32Value,
     use_paragraph_spacing: BooleanValue,
     shape_auto_fit:        Option<ShapeAutoFit>,
+    /// `a:prstTxWarp` (the warp of WordArt): the preset and its adjust values.
+    preset_text_warp:      Option<(Box<str>, AdjustValueList)>,
+    /// `a:noAutofit` / `a:normAutofit` (with its attributes), as read.
+    other_auto_fit:        Option<(Box<str>, Vec<(Box<str>, Box<str>)>)>,
+    /// The attributes not modelled above (`vert`, `upright`, `numCol`...), as read.
+    other_attributes:      Vec<(Box<str>, Box<str>)>,
 }
 
 impl BodyProperties {
@@ -313,7 +320,10 @@ impl BodyProperties {
                 b"spcFirstLastPara" => {
                     self.use_paragraph_spacing.set_value_string(value);
                 }
-                _ => {}
+                _ => {
+                    let key = String::from_utf8_lossy(key).into();
+                    self.other_attributes.push((key, value.into()));
+                }
             }
         }
 
@@ -323,11 +333,40 @@ impl BodyProperties {
 
         xml_read_loop!(
             reader,
-            Event::Empty(ref e) => {
-                if e.name().into_inner() == b"a:spAutoFit" {
-                    let obj = ShapeAutoFit::default();
-                    ShapeAutoFit::set_attributes(reader, e);
-                    self.set_shape_auto_fit(obj);
+            ref n @ (Event::Empty(ref e) | Event::Start(ref e)) => {
+                let is_empty = matches!(n, Event::Empty(_));
+                match e.name().into_inner() {
+                    b"a:spAutoFit" => {
+                        let obj = ShapeAutoFit::default();
+                        ShapeAutoFit::set_attributes(reader, e);
+                        self.set_shape_auto_fit(obj);
+                    }
+                    b"a:noAutofit" | b"a:normAutofit" => {
+                        let name = String::from_utf8_lossy(e.name().into_inner()).into();
+                        let attrs = e
+                            .attributes()
+                            .with_checks(false)
+                            .flatten()
+                            .map(|a| (String::from_utf8_lossy(a.key.into_inner()).into(), get_attribute_value(&a).unwrap().into()))
+                            .collect();
+                        self.other_auto_fit = Some((name, attrs));
+                    }
+                    b"a:prstTxWarp" => {
+                        let prst = e
+                            .attributes()
+                            .with_checks(false)
+                            .flatten()
+                            .find(|a| a.key.into_inner() == b"prst")
+                            .map(|a| get_attribute_value(&a).unwrap())
+                            .unwrap_or_default();
+                        self.preset_text_warp = Some((prst.into(), AdjustValueList::default()));
+                    }
+                    b"a:avLst" if !is_empty => {
+                        if let Some((_, list)) = &mut self.preset_text_warp {
+                            list.set_attributes(reader, e);
+                        }
+                    }
+                    _ => (),
                 }
             },
             Event::End(ref e) => {
@@ -340,7 +379,8 @@ impl BodyProperties {
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        let empty_flag = &self.shape_auto_fit.is_none();
+        let empty_flag =
+            &(self.shape_auto_fit.is_none() && self.other_auto_fit.is_none() && self.preset_text_warp.is_none());
 
         // a:bodyPr
         let mut attributes: crate::structs::AttrCollection = Vec::new();
@@ -389,11 +429,24 @@ impl BodyProperties {
             );
         }
 
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
+        }
+
         write_start_tag(writer, "a:bodyPr", attributes, *empty_flag);
 
         if !*empty_flag {
+            // a:prstTxWarp
+            if let Some((prst, list)) = &self.preset_text_warp {
+                write_start_tag(writer, "a:prstTxWarp", vec![("prst", &**prst).into()], false);
+                list.write_to(writer);
+                write_end_tag(writer, "a:prstTxWarp");
+            }
             if self.shape_auto_fit.is_some() {
                 ShapeAutoFit::write_to(writer);
+            } else if let Some((name, attrs)) = &self.other_auto_fit {
+                let attrs = attrs.iter().map(|(k, v)| (&**k, &**v).into()).collect();
+                write_start_tag(writer, &**name, attrs, true);
             }
 
             write_end_tag(writer, "a:bodyPr");

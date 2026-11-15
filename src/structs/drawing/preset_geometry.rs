@@ -271,8 +271,13 @@ impl PresetGeometry {
         &mut self,
         reader: &mut Reader<R>,
         e: &BytesStart,
+        empty_flag: bool,
     ) {
         self.set_geometry(get_attribute(e, b"prst").unwrap());
+
+        if empty_flag {
+            return;
+        }
 
         xml_read_loop!(
             reader,

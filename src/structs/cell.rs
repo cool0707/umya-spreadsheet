@@ -688,14 +688,14 @@ impl Cell {
                             }
                         }
                         let mut buf = Vec::new();
-                        let text = crate::helper::utils::unescape_xml_text(&reader.read_text_into(e.name(), &mut buf).unwrap());
+                        let text = crate::helper::utils::unescape_ooxml_string(crate::helper::utils::unescape_xml_text(&reader.read_text_into(e.name(), &mut buf).unwrap()));
                         self.set_value_string_crate(text);
                         reader.config_mut().trim_text(true);
 
                     }
                     b"v" => {
                         let mut buf = Vec::new();
-                        let text = crate::helper::utils::unescape_xml_text(&reader.read_text_into(e.name(), &mut buf).unwrap());
+                        let text = crate::helper::utils::unescape_ooxml_string(crate::helper::utils::unescape_xml_text(&reader.read_text_into(e.name(), &mut buf).unwrap()));
                         match type_value.as_str() {
                             "str" => {
                                 self.set_value_string_crate(text);
@@ -840,7 +840,7 @@ impl Cell {
                     write_text_node(writer, val_index.to_string());
                 }
                 "str" => {
-                    write_text_node_conversion(writer, self.value());
+                    write_text_node_conversion(writer, crate::helper::utils::escape_ooxml_string(&self.value()).into_owned());
                 }
                 "b" => {
                     let upper_value = self.value().to_uppercase();

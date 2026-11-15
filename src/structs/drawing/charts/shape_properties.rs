@@ -289,12 +289,12 @@ impl ShapeProperties {
                     }
                     b"a:prstGeom" => {
                         let mut obj = PresetGeometry::default();
-                        obj.set_attributes(reader, e);
+                        obj.set_attributes(reader, e, false);
                         self.set_geometry(obj);
                     }
                     b"a:ln" => {
                         let mut obj = Outline::default();
-                        obj.set_attributes(reader, e);
+                        obj.set_attributes(reader, e, false);
                         self.set_outline(obj);
                     }
                     b"a:solidFill" => {
@@ -321,10 +321,23 @@ impl ShapeProperties {
                 }
             },
             Event::Empty(ref e) => {
-                if e.name().0 == b"a:noFill" {
-                    let obj = NoFill::default();
-                    NoFill::set_attributes(reader, e, true);
-                    self.set_no_fill(obj);
+                match e.name().0 {
+                    b"a:noFill" => {
+                        let obj = NoFill::default();
+                        NoFill::set_attributes(reader, e, true);
+                        self.set_no_fill(obj);
+                    }
+                    b"a:ln" => {
+                        let mut obj = Outline::default();
+                        obj.set_attributes(reader, e, true);
+                        self.set_outline(obj);
+                    }
+                    b"a:prstGeom" => {
+                        let mut obj = PresetGeometry::default();
+                        obj.set_attributes(reader, e, true);
+                        self.set_geometry(obj);
+                    }
+                    _ => (),
                 }
             },
             Event::End(ref e) => {
