@@ -21,6 +21,7 @@ use crate::{
     structs::{
         Cell,
         CellMetadata,
+        PartStore,
         RichData,
         SharedStringTable,
         Stylesheet,
@@ -102,6 +103,9 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
 
     // What the `vm` of the cells refers to (pictures placed in cells).
     book.set_rich_data(RichData::read(&mut arv, &workbook_rel));
+
+    // What the charts of the drawings are made of.
+    book.set_chart_parts(PartStore::read(&mut arv));
 
     shared_strings::read(&mut arv, &mut book)?;
     styles::read(&mut arv, &mut book)?;
@@ -201,6 +205,7 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
     shared_string_table: &RwLock<SharedStringTable>,
     stylesheet: &Stylesheet,
     cell_metadata: &CellMetadata,
+    chart_parts: &PartStore,
 ) {
     if worksheet.is_deserialized() {
         return;
@@ -233,6 +238,7 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
                         worksheet,
                         relationship.raw_file(),
                         raw_data_of_worksheet.drawing_relationships(),
+                        chart_parts,
                     );
                 }
                 // comment

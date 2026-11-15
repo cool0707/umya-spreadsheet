@@ -15,6 +15,7 @@ use crate::{
         Address,
         CalculationProperties,
         CellMetadata,
+        PartStore,
         RichData,
         CellValue,
         Cells,
@@ -55,6 +56,7 @@ pub struct Workbook {
     calculation_properties: CalculationProperties,
     cell_metadata:         CellMetadata,
     rich_data:             RichData,
+    chart_parts:           PartStore,
 }
 
 impl Workbook {
@@ -541,6 +543,7 @@ impl Workbook {
         let shared_string_table = self.shared_string_table();
         let stylesheet = self.stylesheet().clone();
         let cell_metadata = &self.cell_metadata;
+        let chart_parts = &self.chart_parts;
         for worksheet in &mut self.work_sheet_collection {
             if !worksheet.is_deserialized() {
                 raw_to_deserialize_by_worksheet(
@@ -548,6 +551,7 @@ impl Workbook {
                     &shared_string_table,
                     &stylesheet,
                     cell_metadata,
+                    chart_parts,
                 );
             }
         }
@@ -569,6 +573,7 @@ impl Workbook {
             &shared_string_table,
             &stylesheet,
             &self.cell_metadata,
+            &self.chart_parts,
         );
         self
     }
@@ -665,6 +670,7 @@ impl Workbook {
             &shared_string_table,
             &stylesheet,
             &self.cell_metadata,
+            &self.chart_parts,
         );
         Ok(worksheet)
     }
@@ -1098,6 +1104,14 @@ impl Workbook {
     #[inline]
     pub(crate) fn set_rich_data(&mut self, value: RichData) -> &mut Self {
         self.rich_data = value;
+        self
+    }
+
+    /// The parts of the file read that its charts are made of, for the
+    /// drawings of the sheets to keep their charts as they were.
+    #[inline]
+    pub(crate) fn set_chart_parts(&mut self, value: PartStore) -> &mut Self {
+        self.chart_parts = value;
         self
     }
 

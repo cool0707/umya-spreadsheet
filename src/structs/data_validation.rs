@@ -12,6 +12,8 @@ use quick_xml::{
 
 use super::{
     BooleanValue,
+    DataValidationErrorStyleValues,
+    DataValidationImeModeValues,
     DataValidationOperatorValues,
     DataValidationValues,
     EnumValue,
@@ -34,8 +36,11 @@ use crate::{
 #[derive(Default, Debug, Clone)]
 pub struct DataValidation {
     r#type:                 EnumValue<DataValidationValues>,
+    error_style:            EnumValue<DataValidationErrorStyleValues>,
+    ime_mode:               EnumValue<DataValidationImeModeValues>,
     operator:               EnumValue<DataValidationOperatorValues>,
     allow_blank:            BooleanValue,
+    show_drop_down:         BooleanValue,
     show_input_message:     BooleanValue,
     show_error_message:     BooleanValue,
     prompt_title:           StringValue,
@@ -56,6 +61,46 @@ impl DataValidation {
     #[inline]
     pub fn set_type(&mut self, value: DataValidationValues) -> &mut Self {
         self.r#type.set_value(value);
+        self
+    }
+
+    /// The style of the error alert: stop (the default), warning or information.
+    #[inline]
+    #[must_use]
+    pub fn error_style(&self) -> &DataValidationErrorStyleValues {
+        self.error_style.value()
+    }
+
+    #[inline]
+    pub fn set_error_style(&mut self, value: DataValidationErrorStyleValues) -> &mut Self {
+        self.error_style.set_value(value);
+        self
+    }
+
+    /// The input method mode for the cells (noControl by default).
+    #[inline]
+    #[must_use]
+    pub fn ime_mode(&self) -> &DataValidationImeModeValues {
+        self.ime_mode.value()
+    }
+
+    #[inline]
+    pub fn set_ime_mode(&mut self, value: DataValidationImeModeValues) -> &mut Self {
+        self.ime_mode.set_value(value);
+        self
+    }
+
+    /// `showDropDown`: true hides the in-cell drop-down of a list (the name is the
+    /// other way round in the file format).
+    #[inline]
+    #[must_use]
+    pub fn show_drop_down(&self) -> bool {
+        self.show_drop_down.value()
+    }
+
+    #[inline]
+    pub fn set_show_drop_down(&mut self, value: bool) -> &mut Self {
+        self.show_drop_down.set_value(value);
         self
     }
 
@@ -289,12 +334,24 @@ impl DataValidation {
             self.r#type.set_value_string(v);
         }
 
+        if let Some(v) = get_attribute(e, b"errorStyle") {
+            self.error_style.set_value_string(v);
+        }
+
+        if let Some(v) = get_attribute(e, b"imeMode") {
+            self.ime_mode.set_value_string(v);
+        }
+
         if let Some(v) = get_attribute(e, b"operator") {
             self.operator.set_value_string(v);
         }
 
         if let Some(v) = get_attribute(e, b"allowBlank") {
             self.allow_blank.set_value_string(v);
+        }
+
+        if let Some(v) = get_attribute(e, b"showDropDown") {
+            self.show_drop_down.set_value_string(v);
         }
 
         if let Some(v) = get_attribute(e, b"showInputMessage") {
@@ -356,7 +413,7 @@ impl DataValidation {
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        let is_inner = self.formula1.text().is_empty() || self.formula2.text().is_empty();
+        let is_inner = !self.formula1.text().is_empty() || !self.formula2.text().is_empty();
 
         // dataValidation
         let mut attributes: crate::structs::AttrCollection = Vec::new();
@@ -365,8 +422,20 @@ impl DataValidation {
             attributes.push(("type", self.r#type.value_string()).into());
         }
 
+        if self.error_style.has_value() {
+            attributes.push(("errorStyle", self.error_style.value_string()).into());
+        }
+
+        if self.ime_mode.has_value() {
+            attributes.push(("imeMode", self.ime_mode.value_string()).into());
+        }
+
         if self.allow_blank.has_value() {
             attributes.push(("allowBlank", self.allow_blank.value_string()).into());
+        }
+
+        if self.show_drop_down.has_value() {
+            attributes.push(("showDropDown", self.show_drop_down.value_string()).into());
         }
 
         if self.show_input_message.has_value() {
@@ -476,5 +545,63 @@ mod tests {
         let mut dv = DataValidation::default();
         dv.set_attributes(&mut reader, &e, false);
         assert_eq!(dv.formula1(), "\"petrol,diesel,LPG,electric\"");
+    }
+
+    fn read(xml: &str) -> DataValidation {
+        let mut reader = Reader::from_str(xml);
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+        let (e, empty) = match reader.read_event_into(&mut buf).unwrap() {
+            Event::Start(e) => (e.into_owned(), false),
+            Event::Empty(e) => (e.into_owned(), true),
+            _ => panic!("expected dataValidation"),
+        };
+        let mut dv = DataValidation::default();
+        dv.set_attributes(&mut reader, &e, empty);
+        dv
+    }
+
+    fn write(dv: &DataValidation) -> String {
+        let mut writer = Writer::new(Cursor::new(Vec::new()));
+        dv.write_to(&mut writer);
+        String::from_utf8(writer.into_inner().into_inner()).unwrap()
+    }
+
+    #[test]
+    fn keeps_both_formulas_of_between() {
+        let dv = read(concat!(
+            r#"<dataValidation type="whole" operator="between" allowBlank="1" sqref="C2:C11">"#,
+            r#"<formula1>1</formula1><formula2>100</formula2></dataValidation>"#,
+        ));
+        let xml = write(&dv);
+        assert!(xml.contains("<formula1>1</formula1>"), "{xml}");
+        assert!(xml.contains("<formula2>100</formula2>"), "{xml}");
+        assert!(xml.contains(r#"operator="between""#), "{xml}");
+        assert_eq!(read(&xml).formula2(), "100");
+    }
+
+    #[test]
+    fn keeps_error_style_ime_mode_and_drop_down() {
+        let dv = read(concat!(
+            r#"<dataValidation type="custom" errorStyle="warning" imeMode="hiragana" "#,
+            r#"showDropDown="1" sqref="A2:A6"><formula1>COUNTIF($A:$A,A2)=1</formula1>"#,
+            r#"</dataValidation>"#,
+        ));
+        assert_eq!(dv.error_style(), &DataValidationErrorStyleValues::Warning);
+        assert_eq!(dv.ime_mode(), &DataValidationImeModeValues::Hiragana);
+        assert!(dv.show_drop_down());
+        let xml = write(&dv);
+        assert!(xml.contains(r#"errorStyle="warning""#), "{xml}");
+        assert!(xml.contains(r#"imeMode="hiragana""#), "{xml}");
+        assert!(xml.contains(r#"showDropDown="1""#), "{xml}");
+        assert!(xml.contains("<formula1>COUNTIF($A:$A,A2)=1</formula1>"), "{xml}");
+    }
+
+    #[test]
+    fn writes_no_formula_element_when_there_is_none() {
+        let dv = read(r#"<dataValidation type="none" sqref="B1"/>"#);
+        let xml = write(&dv);
+        assert!(xml.ends_with("/>"), "{xml}");
+        assert!(!xml.contains("formula"), "{xml}");
     }
 }

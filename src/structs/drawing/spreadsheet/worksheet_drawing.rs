@@ -13,6 +13,8 @@ use quick_xml::{
 use super::{
     ConnectionShape,
     GraphicFrame,
+    KEPT,
+    KeptAnchor,
     OneCellAnchor,
     Picture,
     Shape,
@@ -28,6 +30,7 @@ use crate::{
         Chart,
         Image,
         OleObjects,
+        kept_parts::Shift,
         raw::RawRelationships,
     },
     traits::{
@@ -46,6 +49,8 @@ pub struct WorksheetDrawing {
     chart_collection:           Vec<Chart>,
     one_cell_anchor_collection: Vec<OneCellAnchor>,
     two_cell_anchor_collection: Vec<TwoCellAnchor>,
+    /// The anchors that hold charts, as they were read.
+    kept_anchor_collection:     Vec<KeptAnchor>,
 }
 
 impl WorksheetDrawing {
@@ -285,9 +290,40 @@ impl WorksheetDrawing {
     #[must_use]
     pub fn has_drawing_object(&self) -> bool {
         !self.chart_collection.is_empty()
+            || !self.kept_anchor_collection.is_empty()
             || !self.image_collection.is_empty()
             || !self.one_cell_anchor_collection.is_empty()
             || !self.two_cell_anchor_collection.is_empty()
+    }
+
+    /// The anchors holding the charts read from the file, kept as they were
+    /// (with the parts of the charts) and written back as they were.
+    #[inline]
+    #[must_use]
+    pub fn kept_anchor_collection(&self) -> &[KeptAnchor] {
+        &self.kept_anchor_collection
+    }
+
+    #[inline]
+    pub(crate) fn kept_anchor_collection_mut(&mut self) -> &mut Vec<KeptAnchor> {
+        &mut self.kept_anchor_collection
+    }
+
+    /// The anchors written as they were read: of the charts not changed,
+    /// then of those the model does not have.
+    pub(crate) fn kept_anchors_to_write(&self) -> impl Iterator<Item = &KeptAnchor> {
+        self.chart_collection
+            .iter()
+            .filter_map(Chart::kept_unchanged)
+            .chain(&self.kept_anchor_collection)
+    }
+
+    /// The charts written from the model: those not read from a file, and
+    /// those changed since.
+    pub(crate) fn charts_to_write(&self) -> impl Iterator<Item = &Chart> {
+        self.chart_collection
+            .iter()
+            .filter(|chart| chart.kept_unchanged().is_none())
     }
 
     #[must_use]
@@ -515,6 +551,7 @@ impl WorksheetDrawing {
         writer: &mut Writer<Cursor<Vec<u8>>>,
         ole_objects: &OleObjects,
         rel_list: &mut Vec<(String, String)>,
+        kept_relationships: &[Vec<(String, String, bool)>],
     ) {
         // xdr:wsDr
         write_start_tag(
@@ -528,8 +565,20 @@ impl WorksheetDrawing {
         );
 
         // xdr:twoCellAnchor
-        for chart in &self.chart_collection {
+        for chart in self.charts_to_write() {
             chart.two_cell_anchor().write_to(writer, rel_list, 0);
+        }
+        // The anchors kept as they were read, with ids of their own for
+        // their relationships.
+        let mut kept_no = 0;
+        for (anchor, relationships) in self.kept_anchors_to_write().zip(kept_relationships) {
+            let mut ids = Vec::with_capacity(relationships.len());
+            for _ in relationships {
+                rel_list.push((KEPT.to_string(), kept_no.to_string()));
+                kept_no += 1;
+                ids.push(format!("rId{}", rel_list.len()));
+            }
+            anchor.write_to(writer, &ids);
         }
         for image in &self.image_collection {
             image.write_to(writer, rel_list);
@@ -561,6 +610,16 @@ impl AdjustmentCoordinate for WorksheetDrawing {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   false,
+        };
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.move_position(&shift);
+        }
         for anchor in &mut self.one_cell_anchor_collection {
             anchor.adjustment_insert_coordinate(
                 root_col_num,
@@ -602,6 +661,18 @@ impl AdjustmentCoordinate for WorksheetDrawing {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   true,
+        };
+        self.kept_anchor_collection
+            .retain(|k| !k.is_removed(&shift));
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.move_position(&shift);
+        }
         self.one_cell_anchor_collection.retain(|k| {
             !(k.is_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num))
         });
@@ -657,6 +728,17 @@ impl AdjustmentCoordinateWithSheet for WorksheetDrawing {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
+        // charts kept as they were read
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   false,
+        };
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.adjust_references(sheet_name, &shift);
+        }
         // chart
         for chart in &mut self.chart_collection {
             chart.adjustment_insert_coordinate_with_sheet(
@@ -677,6 +759,17 @@ impl AdjustmentCoordinateWithSheet for WorksheetDrawing {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
+        // charts kept as they were read
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   true,
+        };
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.adjust_references(sheet_name, &shift);
+        }
         // chart
         for chart in &mut self.chart_collection {
             chart.adjustment_remove_coordinate_with_sheet(

@@ -52,6 +52,8 @@ pub struct WriterManager<W: io::Seek + io::Write> {
     table_no:              i32,
     pivot_table_no:        i32,
     pivot_cache_hash_list: Vec<String>,
+    /// Content types of parts written as they were read: part name -> type.
+    content_types:         Vec<(String, String)>,
 }
 
 impl<W: io::Seek + io::Write> WriterManager<W> {
@@ -64,6 +66,7 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
             table_no: 0,
             pivot_table_no: 0,
             pivot_cache_hash_list: Vec::new(),
+            content_types: Vec::new(),
         }
     }
 
@@ -126,6 +129,15 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
             self.files.push(target.to_string());
         }
         Ok(())
+    }
+
+    /// The content type of a part written (one this crate does not know
+    /// the type of from its name).
+    pub(crate) fn add_content_type(&mut self, part: &str, content_type: &str) {
+        let name = format!("/{part}");
+        if !self.content_types.iter().any(|(n, _)| *n == name) {
+            self.content_types.push((name, content_type.to_string()));
+        }
     }
 
     #[inline]
@@ -340,6 +352,11 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
         let mut list: Vec<(String, String)> = Vec::new();
         for file in &self.files {
             let file = format!("/{file}");
+            // Parts written as they were read, with the types they had.
+            if let Some((_, t)) = self.content_types.iter().find(|(n, _)| *n == file) {
+                list.push((file, t.clone()));
+                continue;
+            }
             let mut content_type = "";
 
             // Override workbook

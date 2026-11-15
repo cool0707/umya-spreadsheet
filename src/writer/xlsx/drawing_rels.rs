@@ -26,6 +26,7 @@ use crate::{
     structs::{
         Worksheet,
         WriterManager,
+        drawing::spreadsheet::KEPT,
     },
 };
 
@@ -76,6 +77,17 @@ pub(crate) fn write<W: io::Seek + io::Write>(
                 format!("../media/{value}").as_str(),
                 "",
             );
+        } else if let Some(mode) = key.strip_prefix(KEPT) {
+            // A relationship of a chart kept as it was read: type, target.
+            if let Some((rel_type, target)) = value.split_once('\n') {
+                is_write = write_relationship(
+                    &mut writer,
+                    r_id,
+                    rel_type,
+                    target,
+                    if mode == "X" { "External" } else { "" },
+                );
+            }
         }
     }
     write_end_tag(&mut writer, "Relationships");
