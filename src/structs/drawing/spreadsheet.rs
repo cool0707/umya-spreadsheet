@@ -78,3 +78,6 @@ pub use self::group_shape_properties::*;
 
 mod non_visual_group_shape_drawing_properties;
 pub use self::non_visual_group_shape_drawing_properties::*;
+
+mod kept_anchor;
+pub use self::kept_anchor::*;

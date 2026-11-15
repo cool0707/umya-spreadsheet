@@ -1,5 +1,7 @@
 use crate::{
     drawing::charts::{NumericValue, RichText}, office2010::drawing::charts::Style, structs::{
+        kept_parts::Shift,
+        drawing::spreadsheet::KeptAnchor,
         drawing::{
             charts::{
                 Area3DChart,
@@ -134,6 +136,11 @@ use crate::{
 pub struct Chart {
     two_cell_anchor:  Box<TwoCellAnchor>,
     default_language: String,
+    /// For a chart read from a file: the anchor and the parts of the chart
+    /// as they were read, and what the model was like then. While the model
+    /// stays so, the chart is written as it was read (the model leaves out
+    /// much of a chart).
+    kept:             Option<Box<(KeptAnchor, u64)>>,
 }
 
 impl Default for Chart {
@@ -142,10 +149,51 @@ impl Default for Chart {
         Self {
             two_cell_anchor:  Box::new(TwoCellAnchor::default()),
             default_language: "en-GB".into(),
+            kept:             None,
         }
     }
 }
 impl Chart {
+    /// What the model is like (the anchor with the chart in it).
+    fn model_hash(&self) -> u64 {
+        use std::hash::{
+            Hash,
+            Hasher,
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{:?}", self.two_cell_anchor).hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Keeps the anchor and the parts of the chart as they were read.
+    pub(crate) fn set_kept(&mut self, kept: KeptAnchor) -> &mut Self {
+        let hash = self.model_hash();
+        self.kept = Some(Box::new((kept, hash)));
+        self
+    }
+
+    /// The anchor as it was read, while the model has not been changed.
+    pub(crate) fn kept_unchanged(&self) -> Option<&KeptAnchor> {
+        let kept = self.kept.as_deref()?;
+        (kept.1 == self.model_hash()).then_some(&kept.0)
+    }
+
+    /// Changes the model and what was kept alike: what was kept is still
+    /// written when the model was not changed otherwise.
+    fn adjust_both(&mut self, model: impl FnOnce(&mut TwoCellAnchor), kept: impl FnOnce(&mut KeptAnchor)) {
+        let unchanged = self.kept_unchanged().is_some();
+        model(&mut self.two_cell_anchor);
+        if let Some(k) = self.kept.as_deref_mut() {
+            kept(&mut k.0);
+        }
+        if unchanged {
+            let hash = self.model_hash();
+            if let Some(k) = self.kept.as_deref_mut() {
+                k.1 = hash;
+            }
+        }
+    }
+
     #[inline]
     pub fn set_title<S: Into<String>>(&mut self, value: S) -> &mut Self {
         let title = self.make_title(value);
@@ -2292,11 +2340,16 @@ impl AdjustmentCoordinate for Chart {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.two_cell_anchor.as_mut().adjustment_insert_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   false,
+        };
+        self.adjust_both(
+            |a| a.adjustment_insert_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num),
+            |k| k.move_position(&shift),
         );
     }
 
@@ -2308,11 +2361,16 @@ impl AdjustmentCoordinate for Chart {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.two_cell_anchor.as_mut().adjustment_remove_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   true,
+        };
+        self.adjust_both(
+            |a| a.adjustment_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num),
+            |k| k.move_position(&shift),
         );
     }
 
@@ -2342,15 +2400,25 @@ impl AdjustmentCoordinateWithSheet for Chart {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.two_cell_anchor
-            .as_mut()
-            .adjustment_insert_coordinate_with_sheet(
-                sheet_name,
-                root_col_num,
-                offset_col_num,
-                root_row_num,
-                offset_row_num,
-            );
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   false,
+        };
+        self.adjust_both(
+            |a| {
+                a.adjustment_insert_coordinate_with_sheet(
+                    sheet_name,
+                    root_col_num,
+                    offset_col_num,
+                    root_row_num,
+                    offset_row_num,
+                );
+            },
+            |k| k.adjust_references(sheet_name, &shift),
+        );
     }
 
     #[inline]
@@ -2362,14 +2430,24 @@ impl AdjustmentCoordinateWithSheet for Chart {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.two_cell_anchor
-            .as_mut()
-            .adjustment_insert_coordinate_with_sheet(
-                sheet_name,
-                root_col_num,
-                offset_col_num,
-                root_row_num,
-                offset_row_num,
-            );
+        let shift = Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   true,
+        };
+        self.adjust_both(
+            |a| {
+                a.adjustment_remove_coordinate_with_sheet(
+                    sheet_name,
+                    root_col_num,
+                    offset_col_num,
+                    root_row_num,
+                    offset_row_num,
+                );
+            },
+            |k| k.adjust_references(sheet_name, &shift),
+        );
     }
 }

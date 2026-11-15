@@ -15,6 +15,7 @@ use super::{
 use crate::structs::{
     Worksheet,
     WriterManager,
+    drawing::spreadsheet::KEPT,
 };
 
 pub(crate) fn write<W: io::Seek + io::Write>(
@@ -38,9 +39,31 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         .unwrap();
     write_new_line(&mut writer);
 
-    worksheet
+    // The parts of the charts kept as they were read.
+    let kept_relationships = worksheet
         .worksheet_drawing()
-        .write_to(&mut writer, worksheet.ole_objects(), &mut rel_list);
+        .kept_anchors_to_write()
+        .map(|anchor| anchor.write_parts(writer_mng))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    worksheet.worksheet_drawing().write_to(
+        &mut writer,
+        worksheet.ole_objects(),
+        &mut rel_list,
+        &kept_relationships,
+    );
+    // The relationships of the kept anchors, in the order they were listed.
+    let kept: Vec<&(String, String, bool)> = kept_relationships.iter().flatten().collect();
+    for (key, value) in &mut rel_list {
+        if key == KEPT {
+            if let Some((rel_type, target, external)) =
+                value.parse::<usize>().ok().and_then(|n| kept.get(n))
+            {
+                *key = format!("{KEPT}{}", if *external { "X" } else { "" });
+                *value = format!("{rel_type}\n{target}");
+            }
+        }
+    }
 
     let file_no = writer_mng.add_file_at_drawing(writer)?;
     Ok((file_no.to_string(), rel_list))

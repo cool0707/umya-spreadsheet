@@ -112,8 +112,7 @@ fn write_zip_to_writer<W: io::Write + io::Seek>(
                 // Add charts
                 let chart_no_list: Result<Vec<String>, XlsxError> = worksheet
                     .worksheet_drawing()
-                    .chart_collection()
-                    .iter()
+                    .charts_to_write()
                     .map(|chart| chart::write(chart.chart_space(), wb, &mut writer_manager))
                     .collect();
 

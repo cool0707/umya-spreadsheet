@@ -186,8 +186,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
         // Add charts
         let chart_no_list: Result<Vec<String>, XlsxError> = worksheet
             .worksheet_drawing()
-            .chart_collection()
-            .iter()
+            .charts_to_write()
             .map(|chart| {
                 chart::write(
                     chart.chart_space(),
