@@ -80,6 +80,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         ("jpeg", "image/jpeg"),
         ("tiff", "image/tiff"),
         ("emf", "image/x-emf"),
+        ("wmf", "image/x-wmf"),
+        ("gif", "image/gif"),
+        ("bmp", "image/bmp"),
+        ("svg", "image/svg+xml"),
+        ("webp", "image/webp"),
         ("xlsx", WORKBOOK),
     ];
 

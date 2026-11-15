@@ -158,6 +158,7 @@ pub_mod_use![
     pub r#break,
     pub range,
     pub reference_mode_values,
+    pub(crate) rich_data,
     pub rich_text,
     pub row_breaks,
     pub row_fields,

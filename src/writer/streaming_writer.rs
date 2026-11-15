@@ -152,6 +152,7 @@ impl<W: io::Write + io::Seek> StreamingWriter<W> {
             &self.work_book,
             has_shared_string_table,
             has_cell_metadata,
+            false,
             &mut self.writer_manager,
         )?;
         content_types::write(&self.work_book, &mut self.writer_manager)?;

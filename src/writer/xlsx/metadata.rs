@@ -17,7 +17,7 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     cell_metadata: &CellMetadata,
     writer_mng: &mut WriterManager<W>,
 ) -> Result<bool, XlsxError> {
-    if cell_metadata.is_empty() {
+    if cell_metadata.is_unused() {
         return Ok(false);
     }
     let mut writer = Writer::new(io::Cursor::new(Vec::new()));
