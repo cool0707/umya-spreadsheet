@@ -371,6 +371,100 @@ impl CellValue {
         (now == **text).then_some(&**raw)
     }
 
+    /// The text of the cell, when it has one (a string or rich text).
+    fn current_text(&self) -> Option<String> {
+        match &self.raw_value {
+            CellRawValue::String(s) => Some(s.to_string()),
+            CellRawValue::RichText(r) => Some(r.text().to_string()),
+            _ => None,
+        }
+    }
+
+    /// The furigana of the text (`rPh`): for each run, the range of the
+    /// text it is the reading of (`start` and `end`, offsets in UTF-16 code
+    /// units) and the reading. Empty when it has none.
+    #[must_use]
+    pub fn phonetic_runs(&self) -> Vec<(u32, u32, String)> {
+        let Some(raw) = self.phonetic() else { return Vec::new() };
+        let mut reader = quick_xml::Reader::from_str(raw);
+        let mut runs = Vec::new();
+        let mut current: Option<(u32, u32, String)> = None;
+        let mut in_t = false;
+        loop {
+            match reader.read_event() {
+                Ok(quick_xml::events::Event::Start(e)) => match e.name().as_ref() {
+                    b"rPh" => {
+                        let num = |key: &[u8]| {
+                            crate::reader::driver::get_attribute(&e, key).and_then(|v| v.parse().ok()).unwrap_or(0)
+                        };
+                        current = Some((num(b"sb"), num(b"eb"), String::new()));
+                    }
+                    b"t" => in_t = true,
+                    _ => {}
+                },
+                Ok(quick_xml::events::Event::Text(t)) if in_t => {
+                    if let Some((_, _, text)) = &mut current {
+                        text.push_str(&crate::helper::utils::unescape_ooxml_string(crate::helper::utils::unescape_xml_text(&t)));
+                    }
+                }
+                Ok(quick_xml::events::Event::End(e)) => match e.name().as_ref() {
+                    b"t" => in_t = false,
+                    b"rPh" => runs.extend(current.take()),
+                    _ => {}
+                },
+                Ok(quick_xml::events::Event::Eof) | Err(_) => break,
+                _ => {}
+            }
+        }
+        runs
+    }
+
+    /// How the furigana are written (`type` of `phoneticPr`:
+    /// `fullwidthKatakana` when none is given, `halfwidthKatakana`,
+    /// `Hiragana`, `noConversion`). None when the text has no furigana.
+    #[must_use]
+    pub fn phonetic_type(&self) -> Option<String> {
+        let raw = self.phonetic()?;
+        let at = raw.find("<phoneticPr")?;
+        let tag = &raw[at..at + raw[at..].find('>')?];
+        let key = " type=\"";
+        Some(tag.find(key).map_or_else(
+            || "fullwidthKatakana".to_string(),
+            |i| {
+                let rest = &tag[i + key.len()..];
+                rest[..rest.find('"').unwrap_or(rest.len())].to_string()
+            },
+        ))
+    }
+
+    /// Gives the text of the cell these furigana: runs of (`start`, `end`
+    /// in UTF-16 code units of the text, reading), written as `kind` (see
+    /// [`CellValue::phonetic_type`]; None for the default). No runs remove
+    /// them. They stay while the cell keeps this text; a cell without text
+    /// takes none.
+    pub fn set_phonetic_runs(&mut self, runs: &[(u32, u32, String)], kind: Option<&str>) -> &mut Self {
+        let text = match self.current_text() {
+            Some(text) if !runs.is_empty() => text,
+            _ => {
+                self.phonetic = None;
+                return self;
+            }
+        };
+        let mut raw = String::new();
+        for (start, end, reading) in runs {
+            raw.push_str(&format!(
+                "<rPh sb=\"{start}\" eb=\"{end}\"><t>{}</t></rPh>",
+                quick_xml::escape::escape(crate::helper::utils::escape_ooxml_string(reading).as_ref())
+            ));
+        }
+        match kind {
+            Some(k) if k != "fullwidthKatakana" => raw.push_str(&format!("<phoneticPr fontId=\"1\" type=\"{k}\"/>")),
+            _ => raw.push_str("<phoneticPr fontId=\"1\"/>"),
+        }
+        self.phonetic = Some((text.into(), raw.into()));
+        self
+    }
+
     /// xlsx can't store NaN or infinity as a number, so they become `#NUM!`
     /// like the result of an invalid calculation in Excel.
     #[inline]

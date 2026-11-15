@@ -219,3 +219,46 @@ fn rows_and_columns_keep_their_groups() {
     assert!(sheet.row_dimension(3).unwrap().collapsed());
     assert_eq!(sheet.column_dimension("B").unwrap().outline_level(), 1);
 }
+
+#[test]
+fn furigana_can_be_set_and_read() {
+    let mut book = umya_spreadsheet::new_file();
+    let sheet = book.sheet_mut(0).unwrap();
+    sheet.cell_mut("A1").set_value("東京都");
+    sheet.cell_mut("A1").cell_value_mut().set_phonetic_runs(
+        &[(0, 2, "とうきょう".to_string()), (2, 3, "と".to_string())],
+        Some("Hiragana"),
+    );
+    sheet.cell_mut("A1").set_show_phonetic(true);
+    sheet.cell_mut("A2").set_value("大阪");
+    sheet.cell_mut("A2").cell_value_mut().set_phonetic_runs(&[(0, 2, "オオサカ".to_string())], None);
+    // The text changed afterwards: the furigana are not of it.
+    sheet.cell_mut("A3").set_value("名古屋");
+    sheet.cell_mut("A3").cell_value_mut().set_phonetic_runs(&[(0, 3, "ナゴヤ".to_string())], None);
+    sheet.cell_mut("A3").set_value("京都");
+    // A number takes none.
+    sheet.cell_mut("A4").set_value_number(5);
+    sheet.cell_mut("A4").cell_value_mut().set_phonetic_runs(&[(0, 1, "ゴ".to_string())], None);
+
+    let bytes = write(&book);
+    let shared = &parts(&bytes)["xl/sharedStrings.xml"];
+    assert!(shared.contains(r#"<rPh sb="0" eb="2"><t>とうきょう</t></rPh><rPh sb="2" eb="3"><t>と</t></rPh><phoneticPr fontId="1" type="Hiragana"/>"#), "{shared}");
+    assert!(!shared.contains("ナゴヤ"));
+
+    let book = read(&bytes);
+    let sheet = book.sheet(0).unwrap();
+    let a1 = sheet.cell("A1").unwrap();
+    assert_eq!(a1.cell_value().phonetic_runs(), [(0, 2, "とうきょう".to_string()), (2, 3, "と".to_string())]);
+    assert_eq!(a1.cell_value().phonetic_type().as_deref(), Some("Hiragana"));
+    assert!(a1.show_phonetic());
+    let a2 = sheet.cell("A2").unwrap();
+    assert_eq!(a2.cell_value().phonetic_runs(), [(0, 2, "オオサカ".to_string())]);
+    assert_eq!(a2.cell_value().phonetic_type().as_deref(), Some("fullwidthKatakana"));
+    assert!(sheet.cell("A3").unwrap().cell_value().phonetic_runs().is_empty());
+    assert!(sheet.cell("A4").unwrap().cell_value().phonetic_runs().is_empty());
+
+    // As Excel wrote them.
+    let book = read(&file("excel_features.xlsx"));
+    let cell = book.sheet_by_name("その他").unwrap().cell("E1").unwrap();
+    assert_eq!(cell.cell_value().phonetic_runs(), [(0, 2, "トウキョウ".to_string())]);
+}
