@@ -824,6 +824,130 @@ impl Workbook {
         self.work_sheet_collection.last_mut().unwrap()
     }
 
+    /// Rewrites every formula of the workbook: of the cells, the names, the
+    /// data validations, the conditional formats, the tables, the charts and
+    /// the parts kept as they were read (sparklines, form controls, external
+    /// links aside). `f` gets the sheet the references without a sheet name
+    /// refer to (`None` for the names of the workbook and what is kept with
+    /// it) and the formula as the file holds it (no `=`), and returns the
+    /// new formula or `None` to leave it as it is.
+    pub fn rewrite_formulas(&mut self, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        self.read_sheet_collection();
+        self.rewrite_all(f, None);
+    }
+
+    fn rewrite_all(&mut self, f: &mut crate::helper::rewrite::FormulaFn<'_>, unshare: Option<usize>) {
+        let names: Vec<String> = self.work_sheet_collection.iter().map(|s| s.name().to_string()).collect();
+        for defined_name in &mut self.defined_names {
+            let host = if defined_name.has_local_sheet_id() {
+                names.get(defined_name.local_sheet_id() as usize).map(String::as_str)
+            } else {
+                None
+            };
+            defined_name.rewrite_formulas(host, f);
+        }
+        self.kept_relationships.rewrite_xml(&mut crate::helper::rewrite::FormulaXml { host: None, f });
+        for (i, sheet) in self.work_sheet_collection.iter_mut().enumerate() {
+            sheet.rewrite_formulas_inner(f, unshare == Some(i));
+        }
+    }
+
+    /// Inserts or removes rows or columns of a sheet as Excel does. What is
+    /// on the sheet moves (cells, sizes, merged cells, filters, the ranges of
+    /// data validations, conditional formats, tables, sparklines and pivot
+    /// tables, page breaks, comments, drawings), and `f` rewrites every
+    /// formula of the workbook first (see [`Self::rewrite_formulas`]): it is
+    /// to move the references to the sheet (named, or without a name when
+    /// the sheet it gets is the one edited) as the edit moves the cells.
+    /// The sources of pivot caches on the sheet move too.
+    /// # Errors
+    /// `NotFound` when there is no such sheet.
+    pub fn edit_lines(
+        &mut self,
+        sheet_name: &str,
+        edit: &crate::helper::rewrite::LineEdit,
+        f: &mut crate::helper::rewrite::FormulaFn<'_>,
+    ) -> Result<(), XlsxError> {
+        self.read_sheet_collection();
+        let index = self
+            .work_sheet_collection
+            .iter()
+            .position(|s| s.name() == sheet_name)
+            .ok_or(XlsxError::NotFound())?;
+        self.rewrite_all(f, Some(index));
+        let title = self.work_sheet_collection[index].name().to_string();
+        let mut others = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: false };
+        self.kept_relationships.rewrite_xml(&mut others);
+        for (i, sheet) in self.work_sheet_collection.iter_mut().enumerate() {
+            if i != index {
+                sheet.kept_relationships_mut().rewrite_xml(&mut others);
+            }
+        }
+        self.work_sheet_collection[index].shift_lines(edit);
+        Ok(())
+    }
+
+    /// Copies a sheet as Excel does, giving the copy the name `sheet_name`
+    /// and the place `position` (0 = first). The copy's names refer to it,
+    /// and so do its charts, sparklines and form controls; its formulas keep
+    /// the sheets they name. Its tables get names of their own (the name and
+    /// `_2`, `_3`...), in the order of the original's; formulas that use
+    /// them by name are left to the caller ([`Worksheet::rewrite_formulas`]).
+    /// # Errors
+    /// `NotFound` when there is no sheet at `index`, or an error when the
+    /// name can not be a sheet's.
+    pub fn copy_sheet(&mut self, index: usize, sheet_name: &str, position: usize) -> Result<&mut Worksheet, XlsxError> {
+        Workbook::check_sheet_name(self, sheet_name)?;
+        self.read_sheet_collection();
+        let source = self.work_sheet_collection.get(index).ok_or(XlsxError::NotFound())?;
+        let old = source.name().to_string();
+        let mut copy = source.clone();
+        copy.set_name(sheet_name);
+        copy.make_copy_of(&old);
+        let position = position.min(self.work_sheet_collection.len());
+        // The names local to sheets refer to them by place.
+        let shift = |d: &mut DefinedName| {
+            if d.has_local_sheet_id() && d.local_sheet_id() as usize >= position {
+                d.set_local_sheet_id(d.local_sheet_id() + 1);
+            }
+        };
+        self.defined_names.iter_mut().for_each(shift);
+        for sheet in &mut self.work_sheet_collection {
+            sheet.defined_names_crate_mut().iter_mut().for_each(shift);
+        }
+        for d in copy.defined_names_crate_mut() {
+            if d.has_local_sheet_id() {
+                d.set_local_sheet_id(position as u32);
+            }
+        }
+        // Tables have names of their own in the workbook.
+        let mut taken: Vec<String> = self
+            .work_sheet_collection
+            .iter()
+            .flat_map(|s| s.tables().iter().flat_map(|t| [t.name().to_lowercase(), t.display_name().to_lowercase()]))
+            .collect();
+        for table in copy.tables_mut() {
+            let base = if table.display_name().is_empty() { table.name().to_string() } else { table.display_name().to_string() };
+            let mut n = 2;
+            let name = loop {
+                let name = format!("{base}_{n}");
+                if !taken.contains(&name.to_lowercase()) {
+                    break name;
+                }
+                n += 1;
+            };
+            taken.push(name.to_lowercase());
+            table.set_name(&name);
+            table.set_display_name(&name);
+        }
+        let active = self.workbook_view.active_tab() as usize;
+        if active >= position && active < self.work_sheet_collection.len() {
+            self.workbook_view.set_active_tab(active as u32 + 1);
+        }
+        self.work_sheet_collection.insert(position, copy);
+        Ok(&mut self.work_sheet_collection[position])
+    }
+
     /// Set Sheet Name.
     /// # Arguments
     /// * `index` - target sheet index

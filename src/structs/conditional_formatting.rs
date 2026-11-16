@@ -176,6 +176,12 @@ impl ConditionalFormatting {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        for rule in &mut self.conditional_collection {
+            rule.rewrite_formulas(host, f);
+        }
+    }
+
     /// Writes the formatting as an Excel 2010 one (`x14:conditionalFormatting`).
     pub(crate) fn write_to_x14(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
         write_start_tag(

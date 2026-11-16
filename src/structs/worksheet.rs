@@ -37,6 +37,8 @@ use crate::{
         Color,
         Column,
         ColumnBreaks,
+        CellFormula,
+        CellFormulaValues,
         Columns,
         Comment,
         ConditionalFormatting,
@@ -2650,6 +2652,280 @@ impl Worksheet {
     #[inline]
     pub(crate) fn is_deserialized(&self) -> bool {
         self.raw_data_of_worksheet.is_none()
+    }
+
+    /// Rewrites every formula of the sheet: of the cells, the names, the
+    /// data validations, the conditional formats, the tables, the charts and
+    /// the parts kept as they were read (sparklines, form controls...). `f`
+    /// gets the sheet the references without a sheet name refer to (this
+    /// one) and the formula as the file holds it (no `=`). A shared formula
+    /// whose cells change is written as a formula in each cell.
+    pub fn rewrite_formulas(&mut self, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        self.rewrite_formulas_inner(f, false);
+    }
+
+    /// [`Self::rewrite_formulas`]; `unshare` writes every shared formula as a
+    /// formula in each cell (the cells are about to move).
+    pub(crate) fn rewrite_formulas_inner(&mut self, f: &mut crate::helper::rewrite::FormulaFn<'_>, unshare: bool) {
+        let title = self.title.to_string();
+        let host = Some(title.as_str());
+        // shared index -> whether its cells are written each with its formula
+        let mut groups: HashMap<u32, bool> = HashMap::new();
+        let mut shared: HashMap<(u32, u32), Option<String>> = HashMap::new();
+        for cell in self.cells.collection_mut() {
+            let at = (cell.coordinate().col_num(), cell.coordinate().row_num());
+            let Some(formula) = cell.cell_value_mut().formula.as_deref_mut() else { continue };
+            let text = formula.text().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let new = f(host, &text);
+            if formula.formula_type() == &CellFormulaValues::Shared && formula.shared_index_has_value() {
+                *groups.entry(formula.shared_index()).or_insert(false) |= unshare || new.is_some();
+                shared.insert(at, new);
+            } else if let Some(new) = new {
+                formula.set_text(new);
+            }
+        }
+        if groups.values().any(|v| *v) {
+            for cell in self.cells.collection_mut() {
+                let at = (cell.coordinate().col_num(), cell.coordinate().row_num());
+                let Some(new) = shared.remove(&at) else { continue };
+                let Some(formula) = cell.cell_value_mut().formula.as_deref_mut() else { continue };
+                if groups.get(&formula.shared_index()) != Some(&true) {
+                    continue;
+                }
+                let text = new.unwrap_or_else(|| formula.text().to_string());
+                let mut normal = CellFormula::default();
+                normal.set_text(text);
+                *formula = normal;
+            }
+        }
+        for defined_name in &mut self.defined_names {
+            let host = defined_name.has_local_sheet_id().then_some(title.as_str());
+            defined_name.rewrite_formulas(host, f);
+        }
+        if let Some(v) = &mut self.data_validations {
+            for dv in v.data_validation_list_mut() {
+                dv.rewrite_formulas(host, f);
+            }
+        }
+        if let Some(v) = &mut self.data_validations_2010 {
+            for dv in v.data_validation_list_mut() {
+                dv.rewrite_formulas(host, f);
+            }
+        }
+        for cf in self
+            .conditional_formatting_collection
+            .iter_mut()
+            .chain(self.conditional_formatting_2010_collection.iter_mut())
+        {
+            cf.rewrite_formulas(host, f);
+        }
+        for table in &mut self.tables {
+            for column in table.columns_mut() {
+                column.rewrite_formulas(host, f);
+            }
+        }
+        let mut rw = crate::helper::rewrite::FormulaXml { host, f };
+        self.worksheet_drawing.rewrite_xml(&mut rw);
+        self.kept_relationships.rewrite_xml(&mut rw);
+    }
+
+    /// Moves what the sheet has where rows or columns are inserted or
+    /// removed, as Excel does, but the formulas (those are rewritten by the
+    /// workbook, [`crate::Workbook::edit_lines`]): the cells, the sizes of the
+    /// rows and columns, merged cells, the filter, the ranges of data
+    /// validations, conditional formats, tables, sparklines and pivot
+    /// tables, page breaks, comments and drawings.
+    pub(crate) fn shift_lines(&mut self, edit: &crate::helper::rewrite::LineEdit) {
+        use crate::helper::rewrite::LineAxis;
+        if edit.count == 0 {
+            return;
+        }
+        let (rc, oc, rr, or) = match edit.axis {
+            LineAxis::Rows => (0, 0, edit.at, edit.count),
+            LineAxis::Columns => (edit.at, edit.count, 0, 0),
+        };
+        if edit.insert {
+            if oc != 0 {
+                self.columns.adjustment_insert_value(rc, oc);
+            }
+            if or != 0 {
+                self.rows.adjustment_insert_value(rr, or);
+            }
+            // Cells pushed off the sheet are dropped.
+            let max = edit.max();
+            let over = |c: &Cell| match edit.axis {
+                LineAxis::Rows => c.coordinate().row_num() + edit.count > max,
+                LineAxis::Columns => c.coordinate().col_num() + edit.count > max,
+            };
+            let gone: Vec<(u32, u32)> = self.cells.collection_mut().into_iter().filter(|c| over(c)).map(|c| (c.coordinate().col_num(), c.coordinate().row_num())).collect();
+            for at in gone {
+                self.remove_cell(at);
+            }
+            self.cells.adjustment_insert_coordinate(rc, oc, rr, or);
+            self.worksheet_drawing.adjustment_insert_coordinate(rc, oc, rr, or);
+            for comment in &mut self.comments {
+                comment.adjustment_insert_coordinate(rc, oc, rr, or);
+            }
+            for comment in &mut self.threaded_comments {
+                comment.adjustment_insert_coordinate(rc, oc, rr, or);
+            }
+        } else {
+            if oc != 0 {
+                self.columns.adjustment_remove_value(rc, oc);
+            }
+            if or != 0 {
+                self.rows.adjustment_remove_value(rr, or);
+            }
+            self.cells.adjustment_remove_coordinate(rc, oc, rr, or);
+            self.worksheet_drawing.adjustment_remove_coordinate(rc, oc, rr, or);
+            self.comments.retain(|x| !x.is_remove_coordinate(rc, oc, rr, or));
+            for comment in &mut self.comments {
+                comment.adjustment_remove_coordinate(rc, oc, rr, or);
+            }
+            self.threaded_comments.retain(|x| !x.is_remove_coordinate(rc, oc, rr, or));
+            for comment in &mut self.threaded_comments {
+                comment.adjustment_remove_coordinate(rc, oc, rr, or);
+            }
+        }
+        // Ranges: moved, narrowed or removed.
+        fn ranges(list: &mut Vec<Range>, edit: &crate::helper::rewrite::LineEdit) {
+            list.retain_mut(|r| match edit.area(&r.range()) {
+                Some(new) => {
+                    r.set_range(new);
+                    true
+                }
+                None => false,
+            });
+        }
+        ranges(self.merge_cells.range_collection_mut(), edit);
+        if let Some(filter) = &self.auto_filter {
+            match edit.area(&filter.range().range()) {
+                Some(new) => self.auto_filter.as_mut().unwrap().set_range(new),
+                None => self.auto_filter = None,
+            }
+        }
+        for list in [&mut self.conditional_formatting_collection, &mut self.conditional_formatting_2010_collection] {
+            list.retain_mut(|cf| {
+                ranges(cf.sequence_of_references_mut().range_collection_mut(), edit);
+                !cf.sequence_of_references().range_collection().is_empty()
+            });
+        }
+        if let Some(v) = &mut self.data_validations {
+            v.data_validation_list_mut().retain_mut(|dv| {
+                ranges(dv.sequence_of_references_mut().range_collection_mut(), edit);
+                !dv.sequence_of_references().range_collection().is_empty()
+            });
+            if v.data_validation_list().is_empty() {
+                self.data_validations = None;
+            }
+        }
+        if let Some(v) = &mut self.data_validations_2010 {
+            v.data_validation_list_mut().retain_mut(|dv| {
+                ranges(dv.reference_sequence_mut().value_mut(), edit);
+                !dv.reference_sequence().value().is_empty()
+            });
+            if v.data_validation_list().is_empty() {
+                self.data_validations_2010 = None;
+            }
+        }
+        let mut headers = Vec::new();
+        self.tables.retain_mut(|t| match t.shift_lines(edit) {
+            Some(h) => {
+                headers.extend(h);
+                true
+            }
+            None => false,
+        });
+        for (col, row, name) in headers {
+            self.cell_mut((col, row)).set_value_string(name);
+        }
+        // A manual page break is after the row (column) of its id.
+        let breaks = match edit.axis {
+            LineAxis::Rows => self.row_breaks.break_list_mut(),
+            LineAxis::Columns => self.column_breaks.break_list_mut(),
+        };
+        breaks.retain_mut(|b| {
+            let id = b.id();
+            let new = if edit.insert {
+                edit.index(id)
+            } else if id + 1 >= edit.at + edit.count {
+                // After the last row removed (or below): before the first row left.
+                Some(id - edit.count)
+            } else if id < edit.at {
+                Some(id)
+            } else {
+                None
+            };
+            match new {
+                Some(n) if n > 0 => {
+                    b.set_id(n);
+                    true
+                }
+                _ => false,
+            }
+        });
+        let title = self.title.to_string();
+        let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
+        self.kept_relationships.rewrite_xml(&mut rw);
+    }
+
+    /// Makes a copy of the sheet `old` (already given its own name) one of
+    /// its own, as Excel does: its charts, sparklines and form controls
+    /// refer to the copy (formulas keep the sheets they name, and pivot
+    /// tables their source), it is not selected, has no code name, and its
+    /// threaded comments get ids of their own.
+    pub(crate) fn make_copy_of(&mut self, old: &str) {
+        struct NotSources<'a>(&'a crate::helper::sheet_rename::SheetRename);
+        impl crate::helper::rewrite::XmlRewrite for NotSources<'_> {
+            fn formula(&mut self, formula: &str) -> Option<String> {
+                self.0.formula(formula)
+            }
+        }
+        let rename = crate::helper::sheet_rename::SheetRename::new(old, &self.title);
+        let mut rw = NotSources(&rename);
+        self.worksheet_drawing.rewrite_xml(&mut rw);
+        self.kept_relationships.rewrite_xml(&mut rw);
+        self.code_name.remove_value();
+        for view in self.sheet_views.sheet_view_list_mut() {
+            view.set_tab_selected(false);
+        }
+        let mut ids: HashMap<String, String> = HashMap::new();
+        for c in &self.threaded_comments {
+            let mut b = [0u8; 16];
+            rand::fill(&mut b[..]);
+            let h = b.iter().map(|x| format!("{x:02X}")).collect::<String>();
+            let id = format!("{{{}-{}-{}-{}-{}}}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]);
+            ids.insert(c.id().to_string(), id);
+        }
+        for c in &mut self.threaded_comments {
+            if let Some(id) = ids.get(c.id()).cloned() {
+                c.set_id(id);
+            }
+            if let Some(id) = ids.get(c.parent_id()).cloned() {
+                c.set_parent_id(id);
+            }
+        }
+        // The notes Excel writes for threaded comments name them.
+        for c in &mut self.comments {
+            if let Some(id) = c.author().strip_prefix("tc=").and_then(|id| ids.get(id)).cloned() {
+                c.set_author(format!("tc={id}"));
+            }
+        }
+    }
+
+    /// The areas of the pivot tables on the sheet (`F10:G15`), of those
+    /// read from the file.
+    #[must_use]
+    pub fn pivot_table_areas(&self) -> Vec<String> {
+        self.kept_relationships.pivot_locations()
+    }
+
+    /// The names of the sheet (local or not).
+    pub(crate) fn defined_names_crate_mut(&mut self) -> &mut Vec<DefinedName> {
+        &mut self.defined_names
     }
 
     /// Renames a sheet (this one or another) in what the sheet has that

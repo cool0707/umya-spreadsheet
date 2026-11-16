@@ -35,6 +35,12 @@ impl Formula {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        if let Some(new) = f(host, &self.address_str()) {
+            self.set_string_value(new);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn address(&self) -> &Address {

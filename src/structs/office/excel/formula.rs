@@ -84,6 +84,12 @@ impl Formula {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        if let Some(new) = f(host, &self.formula()) {
+            self.text = Some((new, format!("{:?}", self.value)));
+        }
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,

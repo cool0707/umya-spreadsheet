@@ -201,6 +201,17 @@ impl Chart {
         self.adjust_both(|_| {}, |k| k.rename_sheet(rename));
     }
 
+    /// Rewrites the formulas of the chart as it was read (those of the
+    /// model are left as they are, as with a rename).
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        self.adjust_both(|_| {}, |k| k.rewrite_xml(&mut crate::helper::rewrite::FormulaXml { host, f }));
+    }
+
+    /// Rewrites the XML kept of the chart (the parts it refers to).
+    pub(crate) fn rewrite_kept(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        self.adjust_both(|_| {}, |k| k.rewrite_xml(rw));
+    }
+
     #[inline]
     pub fn set_title<S: Into<String>>(&mut self, value: S) -> &mut Self {
         let title = self.make_title(value);
