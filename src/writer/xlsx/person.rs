@@ -58,6 +58,10 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         false,
     );
 
+    for person in wb.persons() {
+        person.write_to(&mut writer);
+    }
+
     write_end_tag(&mut writer, "personList");
     writer_mng.add_writer(PKG_PERSON, writer)
 }

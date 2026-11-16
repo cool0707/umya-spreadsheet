@@ -21,7 +21,11 @@ use super::{
     },
 };
 use crate::{
-    helper::const_str::SHEET_MAIN_NS,
+    helper::const_str::{
+        MC_NS,
+        SHEET_MAIN_NS,
+        SHEET_MS_REVISION_NS,
+    },
     structs::{
         Worksheet,
         WriterManager,
@@ -48,12 +52,13 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     write_new_line(&mut writer);
 
     // comments
-    write_start_tag(
-        &mut writer,
-        "comments",
-        vec![("xmlns", SHEET_MAIN_NS).into()],
-        false,
-    );
+    let mut attributes: crate::structs::AttrCollection = vec![("xmlns", SHEET_MAIN_NS).into()];
+    if worksheet.comments().iter().any(|c| !c.uid().is_empty()) {
+        attributes.push(("xmlns:mc", MC_NS).into());
+        attributes.push(("mc:Ignorable", "xr").into());
+        attributes.push(("xmlns:xr", SHEET_MS_REVISION_NS).into());
+    }
+    write_start_tag(&mut writer, "comments", attributes, false);
 
     // authors
     let authors = get_authors(worksheet);

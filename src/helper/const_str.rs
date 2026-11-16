@@ -12,6 +12,8 @@ declare_const_strings! {
     CHART_TYPE           => "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
     COMMENTS_NS          => "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
     COMMENTS_TYPE        => "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml",
+    THREADED_COMMENTS_TYPE => "application/vnd.ms-excel.threadedcomments+xml",
+    PERSON_TYPE          => "application/vnd.ms-excel.person+xml",
     THREADED_COMMENT_NS  => "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment",
     THREADED_COMMENTS_NS => "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments",
     PERSION_NS           => "http://schemas.microsoft.com/office/2017/10/relationships/person",

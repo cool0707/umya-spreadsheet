@@ -3010,6 +3010,14 @@ impl AdjustmentCoordinate for Worksheet {
                 offset_row_num,
             );
         }
+        for comment in &mut self.threaded_comments {
+            comment.adjustment_insert_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        }
 
         // conditional styles
         for conditional_styles in self
@@ -3110,6 +3118,17 @@ impl AdjustmentCoordinate for Worksheet {
             !(x.is_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num))
         });
         for comment in &mut self.comments {
+            comment.adjustment_remove_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        }
+        self.threaded_comments.retain(|x| {
+            !(x.is_remove_coordinate(root_col_num, offset_col_num, root_row_num, offset_row_num))
+        });
+        for comment in &mut self.threaded_comments {
             comment.adjustment_remove_coordinate(
                 root_col_num,
                 offset_col_num,

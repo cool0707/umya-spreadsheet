@@ -44,6 +44,7 @@ pub struct Comment {
     text:       CommentText,
     shape:      Shape,
     id:         StringValue,
+    uid:        Box<str>,
 }
 
 impl Comment {
@@ -205,6 +206,20 @@ impl Comment {
         self
     }
 
+    /// `xr:uid`: for the note Excel writes in place of a threaded comment,
+    /// the id of the thread.
+    #[inline]
+    #[must_use]
+    pub fn uid(&self) -> &str {
+        &self.uid
+    }
+
+    #[inline]
+    pub fn set_uid<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.uid = value.into().into_boxed_str();
+        self
+    }
+
     #[inline]
     pub fn new_comment<T>(&mut self, coordinate: T) -> &mut Self
     where
@@ -293,6 +308,7 @@ impl Comment {
         self.set_author(author);
 
         set_string_from_xml!(self, e, id, "id");
+        self.set_uid(get_attribute(e, b"xr:uid").unwrap_or_default());
 
         xml_read_loop!(
             reader,
@@ -322,6 +338,9 @@ impl Comment {
         attributes.push(("authorId", &author_id).into());
         if self.id.has_value() {
             attributes.push(("id", self.id.value_str()).into());
+        }
+        if !self.uid.is_empty() {
+            attributes.push(("xr:uid", &*self.uid).into());
         }
         write_start_tag(writer, "comment", attributes, false);
 

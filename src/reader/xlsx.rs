@@ -11,6 +11,7 @@ use crate::{
     helper::const_str::{
         COMMENTS_NS,
         DRAWINGS_NS,
+        PERSION_NS,
         SHEET_METADATA_NS,
         TABLE_NS,
         THEME_NS,
@@ -96,6 +97,19 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
         if type_value == SHEET_METADATA_NS {
             if let Ok(file) = driver::zip_by_name(&mut arv, &format!("xl/{rel_target}")) {
                 book.set_cell_metadata(CellMetadata::read(io::BufReader::new(file)));
+            }
+        }
+    }
+
+    // The authors of the threaded comments.
+    for (_, type_value, rel_target) in &workbook_rel {
+        if type_value == PERSION_NS {
+            let path = driver::join_paths("xl", rel_target);
+            if let Ok(mut file) = driver::zip_by_name(&mut arv, &path) {
+                let mut data = Vec::new();
+                if io::Read::read_to_end(&mut file, &mut data).is_ok() {
+                    *book.persons_mut() = crate::structs::office2019::person::Person::read_list(&data);
+                }
             }
         }
     }

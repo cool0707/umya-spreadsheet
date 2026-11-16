@@ -58,6 +58,7 @@ pub struct Workbook {
     rich_data:             RichData,
     chart_parts:           PartStore,
     kept_relationships:    crate::structs::KeptRelationships,
+    persons:               Vec<crate::structs::office2019::person::Person>,
 }
 
 impl Workbook {
@@ -1106,6 +1107,18 @@ impl Workbook {
     pub(crate) fn set_rich_data(&mut self, value: RichData) -> &mut Self {
         self.rich_data = value;
         self
+    }
+
+    /// The authors of the threaded comments (`ThreadedComment::person_id`).
+    #[inline]
+    #[must_use]
+    pub fn persons(&self) -> &[crate::structs::office2019::person::Person] {
+        &self.persons
+    }
+
+    #[inline]
+    pub fn persons_mut(&mut self) -> &mut Vec<crate::structs::office2019::person::Person> {
+        &mut self.persons
     }
 
     /// The relationships to parts the model has nothing for, kept with those

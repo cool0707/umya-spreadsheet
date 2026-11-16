@@ -12,6 +12,8 @@ use crate::{
     helper::const_str::{
         CHART_TYPE,
         COMMENTS_TYPE,
+        PERSON_TYPE,
+        THREADED_COMMENTS_TYPE,
         CORE_PROPS_TYPE,
         CUSTOM_PROPS_TYPE,
         DRAWING_TYPE,
@@ -411,6 +413,14 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
             // Override comments
             if file.starts_with("/xl/comments") {
                 content_type = COMMENTS_TYPE;
+            }
+
+            // Override threaded comments and their authors
+            if file.starts_with("/xl/threadedComments/threadedComment") {
+                content_type = THREADED_COMMENTS_TYPE;
+            }
+            if file == "/xl/persons/person.xml" {
+                content_type = PERSON_TYPE;
             }
 
             // Override theme
