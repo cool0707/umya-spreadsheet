@@ -44,6 +44,15 @@ pub struct DataValidation {
     formula2:           Option<Box<DataValidationForumla2>>,
 }
 impl DataValidation {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        if let Some(f) = &mut self.formula1 {
+            f.value_mut().rename_sheet(rename);
+        }
+        if let Some(f) = &mut self.formula2 {
+            f.value_mut().rename_sheet(rename);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &DataValidationValues {

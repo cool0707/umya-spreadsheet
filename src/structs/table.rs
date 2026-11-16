@@ -288,6 +288,12 @@ pub struct TableColumn {
     calculated_column_formula: Option<String>,
 }
 impl TableColumn {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        if let Some(new) = self.calculated_column_formula.as_deref().and_then(|f| rename.formula(f)) {
+            self.calculated_column_formula = Some(new);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn new(name: &str) -> Self {

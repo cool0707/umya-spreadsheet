@@ -28,6 +28,12 @@ pub struct ColorScale {
 }
 
 impl ColorScale {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for cfvo in &mut self.cfvo_collection {
+            cfvo.rename_sheet(rename);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn cfvo_collection(&self) -> &[ConditionalFormatValueObject] {

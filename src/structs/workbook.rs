@@ -837,12 +837,22 @@ impl Workbook {
     ) -> Result<(), XlsxError> {
         let sheet_name_str = sheet_name.into();
         Workbook::check_sheet_name(self, sheet_name_str.as_ref())?;
-        self.work_sheet_collection
-            .get_mut(index)
-            .map(|sheet| {
-                sheet.set_name(sheet_name_str);
-            })
-            .ok_or(XlsxError::NotFound())
+        if index >= self.work_sheet_collection.len() {
+            return Err(XlsxError::NotFound());
+        }
+        // What refers to the sheet is renamed too, as in Excel.
+        self.read_sheet_collection();
+        let old = self.work_sheet_collection[index].name().to_string();
+        self.work_sheet_collection[index].set_name(sheet_name_str);
+        let rename = crate::helper::sheet_rename::SheetRename::new(&old, self.work_sheet_collection[index].name());
+        for defined_name in &mut self.defined_names {
+            defined_name.rename_sheet(&rename, false);
+        }
+        self.kept_relationships.rename_sheet(&rename);
+        for sheet in &mut self.work_sheet_collection {
+            sheet.rename_sheet_references(&rename);
+        }
+        Ok(())
     }
 
     /// (This method is crate only.)

@@ -27,6 +27,14 @@ pub struct Formula {
 }
 
 impl Formula {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        // As text: an address is told from a formula only roughly
+        // (`C1>'a b'!A1` would be taken for one on the sheet `C1>'a b'`).
+        if let Some(new) = rename.formula(&self.address_str()) {
+            self.set_string_value(new);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn address(&self) -> &Address {

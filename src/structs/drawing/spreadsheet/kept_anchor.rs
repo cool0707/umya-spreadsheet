@@ -405,6 +405,15 @@ impl KeptAnchor {
         }
     }
 
+    /// Renames a sheet in the references of the chart.
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for r in &mut self.relationships {
+            if let Some(part) = &mut r.part {
+                part.rename_sheet(rename);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn xml(&self) -> &str {
         &self.xml

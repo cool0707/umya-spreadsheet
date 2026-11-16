@@ -296,6 +296,16 @@ impl WorksheetDrawing {
             || !self.two_cell_anchor_collection.is_empty()
     }
 
+    /// Renames a sheet in the references of the charts.
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.rename_sheet(rename);
+        }
+        for chart in &mut self.chart_collection {
+            chart.rename_sheet(rename);
+        }
+    }
+
     /// The anchors holding the charts read from the file, kept as they were
     /// (with the parts of the charts) and written back as they were.
     #[inline]

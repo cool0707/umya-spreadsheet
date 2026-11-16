@@ -170,6 +170,12 @@ impl ConditionalFormatting {
     }
 }
 impl ConditionalFormatting {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for rule in &mut self.conditional_collection {
+            rule.rename_sheet(rename);
+        }
+    }
+
     /// Writes the formatting as an Excel 2010 one (`x14:conditionalFormatting`).
     pub(crate) fn write_to_x14(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
         write_start_tag(

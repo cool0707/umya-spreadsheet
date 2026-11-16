@@ -63,6 +63,15 @@ pub struct CellFormula {
     dynamic_array_collapsed: bool,
 }
 impl CellFormula {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        if let Some(new) = rename.formula(self.text.value_str()) {
+            self.text.set_value(new);
+        }
+        if let Some(new) = rename.formula(self.text_view.value_str()) {
+            self.text_view.set_value(new);
+        }
+    }
+
     /// Whether the formula is a dynamic array formula: one Excel evaluates
     /// as an array and whose result spills into the cells below and to the
     /// right. Such a formula is an array formula ([`CellFormulaValues::Array`])

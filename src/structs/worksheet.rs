@@ -1793,10 +1793,10 @@ impl Worksheet {
     /// # Arguments
     /// * `sheet_name` - Sheet Name. [Caution] no duplicate other worksheet.
     pub fn set_name<S: Into<String>>(&mut self, sheet_name: S) -> &mut Self {
-        self.title = sheet_name.into().into_boxed_str();
-        let title = self.name().to_string();
-        for defined_name in self.defined_names_mut() {
-            defined_name.set_sheet_name(&title);
+        let old = std::mem::replace(&mut self.title, sheet_name.into().into_boxed_str());
+        let rename = crate::helper::sheet_rename::SheetRename::new(&old, &self.title);
+        for defined_name in &mut self.defined_names {
+            defined_name.rename_sheet(&rename, true);
         }
         self
     }
@@ -2650,6 +2650,53 @@ impl Worksheet {
     #[inline]
     pub(crate) fn is_deserialized(&self) -> bool {
         self.raw_data_of_worksheet.is_none()
+    }
+
+    /// Renames a sheet (this one or another) in what the sheet has that
+    /// refers to it: the formulas of the cells, names, data validations,
+    /// conditional formats, tables and pivot tables, and the charts and the
+    /// parts kept as they were read (sparklines, form controls...). As in
+    /// Excel, hyperlinks are left as they are.
+    pub(crate) fn rename_sheet_references(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for cell in self.cells.collection_mut() {
+            if let Some(formula) = cell.cell_value_mut().formula.as_deref_mut() {
+                formula.rename_sheet(rename);
+            }
+        }
+        for defined_name in &mut self.defined_names {
+            defined_name.rename_sheet(rename, false);
+        }
+        if let Some(v) = &mut self.data_validations {
+            for dv in v.data_validation_list_mut() {
+                dv.rename_sheet(rename);
+            }
+        }
+        if let Some(v) = &mut self.data_validations_2010 {
+            for dv in v.data_validation_list_mut() {
+                dv.rename_sheet(rename);
+            }
+        }
+        for cf in self
+            .conditional_formatting_collection
+            .iter_mut()
+            .chain(self.conditional_formatting_2010_collection.iter_mut())
+        {
+            cf.rename_sheet(rename);
+        }
+        for table in &mut self.tables {
+            for column in table.columns_mut() {
+                column.rename_sheet(rename);
+            }
+        }
+        for pivot in &mut self.pivot_tables {
+            if let Some(source) = pivot.pivot_cache_definition_mut().cache_source_mut().worksheet_source_mut() {
+                if rename.matches(source.address().sheet_name()) {
+                    source.address_mut().set_sheet_name(rename.new_name());
+                }
+            }
+        }
+        self.worksheet_drawing.rename_sheet(rename);
+        self.kept_relationships.rename_sheet(rename);
     }
 
     /// The relationships to parts the model has nothing for, kept with those

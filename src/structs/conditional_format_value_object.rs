@@ -38,6 +38,12 @@ pub struct ConditionalFormatValueObject {
 }
 
 impl ConditionalFormatValueObject {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        if let Some(new) = rename.formula(self.val.value_str()) {
+            self.val.set_value(new);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &ConditionalFormatValueObjectValues {

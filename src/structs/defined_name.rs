@@ -197,12 +197,21 @@ impl DefinedName {
         result
     }
 
-    pub(crate) fn set_sheet_name<S: Into<String>>(&mut self, value: S) -> &mut Self {
-        let value = value.into();
-        for address in &mut self.address {
-            address.set_sheet_name(value.clone());
+    /// Renames a sheet in what the name refers to; `own` is whether the
+    /// name is the sheet's, whose addresses with no sheet are then the
+    /// sheet's.
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename, own: bool) {
+        if self.string_value.has_value() {
+            if let Some(new) = rename.formula(self.string_value.value_str()) {
+                self.string_value.set_value(new);
+            }
+            return;
         }
-        self
+        for address in &mut self.address {
+            if rename.matches(address.sheet_name()) || (own && address.sheet_name().is_empty()) {
+                address.set_sheet_name(rename.new_name());
+            }
+        }
     }
 
     pub(crate) fn set_attributes<R: std::io::BufRead>(

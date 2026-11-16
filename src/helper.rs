@@ -9,6 +9,7 @@ pub mod formula;
 pub mod html;
 pub mod number_format;
 pub mod range;
+pub(crate) mod sheet_rename;
 pub mod string_helper;
 pub mod time_zone;
 pub mod utils;

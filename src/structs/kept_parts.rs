@@ -42,6 +42,7 @@ use crate::{
             PKG_MEDIA,
             REL_NS,
         },
+        sheet_rename::SheetRename,
         formula::{
             FormulaToken,
             FormulaTokenSubTypes,
@@ -323,6 +324,24 @@ impl KeptPart {
         }
     }
 
+    /// Renames a sheet in the formulas of the part and the parts it refers
+    /// to (but external links: their sheets are another workbook's).
+    pub(crate) fn rename_sheet(&mut self, rename: &SheetRename) {
+        if self.path.starts_with("xl/externalLinks/") {
+            return;
+        }
+        if extension(&self.path).eq_ignore_ascii_case("xml") {
+            if let Some(data) = rename.xml(&self.data) {
+                self.data = data;
+            }
+        }
+        for relationship in &mut self.relationships {
+            if let Some(part) = &mut relationship.part {
+                part.rename_sheet(rename);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn data(&self) -> &[u8] {
         &self.data
@@ -380,6 +399,18 @@ impl KeptRelationships {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.list.is_empty() && self.xml.is_empty()
+    }
+
+    /// Renames a sheet in the parts and the elements kept.
+    pub(crate) fn rename_sheet(&mut self, rename: &SheetRename) {
+        for (_, _, part) in &mut self.list {
+            part.rename_sheet(rename);
+        }
+        for (_, xml) in &mut self.xml {
+            if let Some(new) = rename.xml(xml.as_bytes()) {
+                *xml = String::from_utf8(new).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+            }
+        }
     }
 
     /// The id a relationship kept is written with.

@@ -194,6 +194,13 @@ impl Chart {
         }
     }
 
+    /// Renames a sheet in the references of the chart as it was read, which
+    /// is what is written while the model is not changed otherwise (the
+    /// formulas of the model are left as they are).
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        self.adjust_both(|_| {}, |k| k.rename_sheet(rename));
+    }
+
     #[inline]
     pub fn set_title<S: Into<String>>(&mut self, value: S) -> &mut Self {
         let title = self.make_title(value);

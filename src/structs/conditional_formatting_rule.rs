@@ -67,6 +67,21 @@ pub struct ConditionalFormattingRule {
 }
 
 impl ConditionalFormattingRule {
+    pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
+        for formula in &mut self.formulas {
+            formula.rename_sheet(rename);
+        }
+        if let Some(v) = &mut self.color_scale {
+            v.rename_sheet(rename);
+        }
+        if let Some(v) = &mut self.data_bar {
+            v.rename_sheet(rename);
+        }
+        if let Some(v) = &mut self.icon_set {
+            v.rename_sheet(rename);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &ConditionalFormatValues {
