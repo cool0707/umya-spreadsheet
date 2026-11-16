@@ -306,6 +306,16 @@ impl WorksheetDrawing {
         }
     }
 
+    /// Rewrites the parts kept of the anchors and the charts.
+    pub(crate) fn rewrite_xml(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        for anchor in &mut self.kept_anchor_collection {
+            anchor.rewrite_xml(rw);
+        }
+        for chart in &mut self.chart_collection {
+            chart.rewrite_kept(rw);
+        }
+    }
+
     /// The anchors holding the charts read from the file, kept as they were
     /// (with the parts of the charts) and written back as they were.
     #[inline]

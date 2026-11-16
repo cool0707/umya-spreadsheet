@@ -34,6 +34,12 @@ impl ColorScale {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        for cfvo in &mut self.cfvo_collection {
+            cfvo.rewrite_formulas(host, f);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn cfvo_collection(&self) -> &[ConditionalFormatValueObject] {

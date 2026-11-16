@@ -53,6 +53,15 @@ impl DataValidation {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        if let Some(v) = &mut self.formula1 {
+            v.value_mut().rewrite_formulas(host, f);
+        }
+        if let Some(v) = &mut self.formula2 {
+            v.value_mut().rewrite_formulas(host, f);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &DataValidationValues {

@@ -354,6 +354,11 @@ impl CellFormula {
     }
 
     #[inline]
+    pub(crate) fn shared_index_has_value(&self) -> bool {
+        self.shared_index.has_value()
+    }
+
+    #[inline]
     pub fn set_shared_index(&mut self, value: u32) -> &mut Self {
         self.shared_index.set_value(value);
         self

@@ -214,6 +214,21 @@ impl DefinedName {
         }
     }
 
+    /// Rewrites what the name refers to; `host` is the sheet of the name's
+    /// addresses with no sheet.
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        let text = self.address();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(new) = f(host, &text) {
+            // As it is read from a file.
+            self.address.clear();
+            self.string_value.remove_value();
+            self.set_address(new);
+        }
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,

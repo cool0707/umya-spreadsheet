@@ -82,6 +82,21 @@ impl ConditionalFormattingRule {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        for formula in &mut self.formulas {
+            formula.rewrite_formulas(host, f);
+        }
+        if let Some(v) = &mut self.color_scale {
+            v.rewrite_formulas(host, f);
+        }
+        if let Some(v) = &mut self.data_bar {
+            v.rewrite_formulas(host, f);
+        }
+        if let Some(v) = &mut self.icon_set {
+            v.rewrite_formulas(host, f);
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &ConditionalFormatValues {

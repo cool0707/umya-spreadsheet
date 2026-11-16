@@ -342,6 +342,24 @@ impl KeptPart {
         }
     }
 
+    /// Rewrites the XML of the part and the parts it refers to (but
+    /// external links: their sheets are another workbook's).
+    pub(crate) fn rewrite_xml(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        if self.path.starts_with("xl/externalLinks/") {
+            return;
+        }
+        if extension(&self.path).eq_ignore_ascii_case("xml") {
+            if let Some(data) = crate::helper::rewrite::rewrite_xml(&self.data, rw) {
+                self.data = data;
+            }
+        }
+        for relationship in &mut self.relationships {
+            if let Some(part) = &mut relationship.part {
+                part.rewrite_xml(rw);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn data(&self) -> &[u8] {
         &self.data
@@ -411,6 +429,45 @@ impl KeptRelationships {
                 *xml = String::from_utf8(new).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
             }
         }
+    }
+
+    /// Rewrites the parts and the elements kept.
+    pub(crate) fn rewrite_xml(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        for (_, _, part) in &mut self.list {
+            part.rewrite_xml(rw);
+        }
+        self.rewrite_elements(rw);
+    }
+
+    /// Rewrites the elements kept (not the parts).
+    pub(crate) fn rewrite_elements(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        for (_, xml) in &mut self.xml {
+            if let Some(new) = crate::helper::rewrite::rewrite_xml(xml.as_bytes(), rw) {
+                *xml = String::from_utf8(new).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+                if let Some(kept) = crate::helper::rewrite::remove_emptied(xml) {
+                    *xml = kept;
+                }
+            }
+        }
+    }
+
+    /// The areas of the pivot tables kept (the `ref` of their `location`).
+    pub(crate) fn pivot_locations(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (_, rel_type, part) in &self.list {
+            if !rel_type.ends_with("/pivotTable") {
+                continue;
+            }
+            let xml = String::from_utf8_lossy(&part.data);
+            if let Some(i) = xml.find("<location ") {
+                let rest = &xml[i..];
+                let end = rest.find('>').unwrap_or(rest.len());
+                if let Some(r) = rest[..end].split(" ref=\"").nth(1).and_then(|r| r.split('"').next()) {
+                    out.push(r.to_string());
+                }
+            }
+        }
+        out
     }
 
     /// The id a relationship kept is written with.

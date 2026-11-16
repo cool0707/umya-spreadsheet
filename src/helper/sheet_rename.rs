@@ -7,22 +7,7 @@
 //! the sheets of other workbooks (`[1]Sheet1!A1`) and the text of strings
 //! (`INDIRECT("Sheet1!A1")`) are left alone.
 
-use std::io::Cursor;
-
-use quick_xml::{
-    Reader,
-    Writer,
-    escape::{
-        partial_escape,
-        unescape,
-    },
-    events::{
-        BytesStart,
-        BytesText,
-        Event,
-        attributes::Attribute,
-    },
-};
+use quick_xml::escape::partial_escape;
 
 /// A sheet renamed from `old` to `new`.
 #[derive(Clone, Debug)]
@@ -31,10 +16,6 @@ pub(crate) struct SheetRename {
     old_lower: String,
     new:       String,
 }
-
-/// The attributes of the parts kept that hold a formula: those of form
-/// controls (`ctrlProps`).
-const FORMULA_ATTRIBUTES: [&[u8]; 4] = [b"fmlaLink", b"fmlaRange", b"fmlaGroup", b"fmlaTxbx"];
 
 impl SheetRename {
     pub(crate) fn new(old: &str, new: &str) -> Self {
@@ -213,118 +194,19 @@ impl SheetRename {
         if self.old.is_empty() || !mentioned {
             return None;
         }
-        let mut reader = Reader::from_reader(data);
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        let mut buf = Vec::new();
-        let mut changed = false;
-        // The text of the open `f` element (escaped), when one is open.
-        let mut formula: Option<String> = None;
-        loop {
-            buf.clear();
-            let event = match reader.read_event_into(&mut buf) {
-                Ok(Event::Eof) => break,
-                Ok(event) => event,
-                Err(_) => return None,
-            };
-            if let Some(text) = &mut formula {
-                match &event {
-                    Event::Text(t) => {
-                        text.push_str(&String::from_utf8_lossy(t));
-                        continue;
-                    }
-                    Event::GeneralRef(r) => {
-                        text.push('&');
-                        text.push_str(&String::from_utf8_lossy(r));
-                        text.push(';');
-                        continue;
-                    }
-                    _ => {
-                        let raw = formula.take().unwrap_or_default();
-                        let new = match &event {
-                            Event::End(e) if e.local_name().into_inner() == b"f" => {
-                                unescape(&raw).ok().and_then(|plain| self.formula(&plain))
-                            }
-                            _ => None,
-                        };
-                        match new {
-                            Some(new) => {
-                                changed = true;
-                                writer
-                                    .write_event(Event::Text(BytesText::from_escaped(partial_escape(&new))))
-                                    .ok()?;
-                            }
-                            None if raw.is_empty() => {}
-                            None => writer.write_event(Event::Text(BytesText::from_escaped(raw))).ok()?,
-                        }
-                    }
-                }
-            }
-            let event = match event {
-                Event::Start(e) => {
-                    if e.local_name().into_inner() == b"f" {
-                        formula = Some(String::new());
-                    }
-                    match self.attributes(&e) {
-                        Some(e) => {
-                            changed = true;
-                            Event::Start(e)
-                        }
-                        None => Event::Start(e),
-                    }
-                }
-                Event::Empty(e) => match self.attributes(&e) {
-                    Some(e) => {
-                        changed = true;
-                        Event::Empty(e)
-                    }
-                    None => Event::Empty(e),
-                },
-                event => event,
-            };
-            writer.write_event(event).ok()?;
-        }
-        changed.then(|| writer.into_inner().into_inner())
+        crate::helper::rewrite::rewrite_xml(data, &mut RenameXml(self))
+    }
+}
+
+struct RenameXml<'a>(&'a SheetRename);
+
+impl crate::helper::rewrite::XmlRewrite for RenameXml<'_> {
+    fn formula(&mut self, formula: &str) -> Option<String> {
+        self.0.formula(formula)
     }
 
-    /// The start tag with the sheet renamed in its attributes, or `None`
-    /// when they do not refer to it.
-    fn attributes(&self, e: &BytesStart<'_>) -> Option<BytesStart<'static>> {
-        let source = e.local_name().into_inner() == b"worksheetSource";
-        let mut changed = false;
-        let mut values: Vec<(Vec<u8>, Option<String>)> = Vec::new();
-        for a in e.attributes().with_checks(false) {
-            let a = a.ok()?;
-            let key = a.key.as_ref();
-            let local = a.key.local_name().into_inner();
-            let raw = crate::reader::driver::get_attribute_value(&a).ok()?;
-            let value = unescape(&raw).ok()?;
-            let new = if source && local == b"sheet" {
-                self.matches(&value).then(|| self.new.clone())
-            } else if FORMULA_ATTRIBUTES.contains(&local) {
-                self.formula(&value)
-            } else {
-                None
-            };
-            changed |= new.is_some();
-            values.push((key.to_vec(), new));
-        }
-        if !changed {
-            return None;
-        }
-        let mut out = BytesStart::new(String::from_utf8_lossy(e.name().into_inner()).into_owned());
-        for (a, (_, new)) in e.attributes().with_checks(false).flatten().zip(values) {
-            match new {
-                Some(new) => {
-                    let value = partial_escape(&new).replace('"', "&quot;");
-                    out.push_attribute(Attribute {
-                        key:   a.key,
-                        value: value.into_bytes().into(),
-                    });
-                }
-                None => out.push_attribute(a),
-            }
-        }
-        Some(out)
+    fn source_sheet(&mut self, sheet: &str) -> Option<String> {
+        self.0.matches(sheet).then(|| self.0.new.clone())
     }
 }
 

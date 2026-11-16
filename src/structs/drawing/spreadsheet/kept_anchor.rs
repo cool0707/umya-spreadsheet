@@ -414,6 +414,15 @@ impl KeptAnchor {
         }
     }
 
+    /// Rewrites the parts the anchor refers to.
+    pub(crate) fn rewrite_xml(&mut self, rw: &mut dyn crate::helper::rewrite::XmlRewrite) {
+        for r in &mut self.relationships {
+            if let Some(part) = &mut r.part {
+                part.rewrite_xml(rw);
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn xml(&self) -> &str {
         &self.xml

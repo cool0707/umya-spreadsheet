@@ -44,6 +44,14 @@ impl ConditionalFormatValueObject {
         }
     }
 
+    pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
+        if self.val.has_value() {
+            if let Some(new) = f(host, self.val.value_str()) {
+                self.val.set_value(new);
+            }
+        }
+    }
+
     #[inline]
     #[must_use]
     pub fn get_type(&self) -> &ConditionalFormatValueObjectValues {
