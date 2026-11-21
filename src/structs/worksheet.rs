@@ -2743,6 +2743,10 @@ impl Worksheet {
         if edit.count == 0 {
             return;
         }
+        if edit.band.is_some() {
+            self.shift_cells_within(edit);
+            return;
+        }
         let (rc, oc, rr, or) = match edit.axis {
             LineAxis::Rows => (0, 0, edit.at, edit.count),
             LineAxis::Columns => (edit.at, edit.count, 0, 0),
@@ -2867,6 +2871,118 @@ impl Worksheet {
                 _ => false,
             }
         });
+        let title = self.title.to_string();
+        let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
+        self.kept_relationships.rewrite_xml(&mut rw);
+    }
+
+    /// [`Self::shift_lines`] for an edit limited to a band (cells inserted
+    /// or removed): the cells and comments of the band move, and the ranges
+    /// that lie within it. The sizes of the rows and columns, the drawings
+    /// and the page breaks stay, and so does what reaches out of the band.
+    fn shift_cells_within(&mut self, edit: &crate::helper::rewrite::LineEdit) {
+        use crate::helper::rewrite::LineAxis;
+        self.cells.shift_within(edit);
+        // The new place of a cell: `None` when it is removed.
+        let place = |c: &crate::structs::Coordinate| -> Option<(u32, u32)> {
+            let (col, row) = (c.col_num(), c.row_num());
+            match edit.axis {
+                LineAxis::Rows if edit.reaches(col) => edit.index(row).map(|r| (col, r)),
+                LineAxis::Columns if edit.reaches(row) => edit.index(col).map(|c| (c, row)),
+                _ => Some((col, row)),
+            }
+        };
+        self.comments.retain_mut(|c| match place(c.coordinate()) {
+            Some((col, row)) => {
+                let (dc, dr) = (i64::from(col) - i64::from(c.coordinate().col_num()), i64::from(row) - i64::from(c.coordinate().row_num()));
+                // The note's box moves with its cell.
+                match (dc, dr) {
+                    (0, 0) => {}
+                    (0, d) if d > 0 => c.adjustment_insert_coordinate(0, 0, 1, d as u32),
+                    (0, d) => {
+                        let at = c.coordinate().row_num() - (-d) as u32;
+                        c.adjustment_remove_coordinate(0, 0, at, (-d) as u32);
+                    }
+                    (d, _) if d > 0 => c.adjustment_insert_coordinate(1, d as u32, 0, 0),
+                    (d, _) => {
+                        let at = c.coordinate().col_num() - (-d) as u32;
+                        c.adjustment_remove_coordinate(at, (-d) as u32, 0, 0);
+                    }
+                }
+                c.coordinate_mut().set_col_num(col).set_row_num(row);
+                true
+            }
+            None => false,
+        });
+        self.threaded_comments.retain_mut(|c| match place(c.coordinate()) {
+            Some((col, row)) => {
+                c.coordinate_mut().set_col_num(col).set_row_num(row);
+                true
+            }
+            None => false,
+        });
+        fn ranges(list: &mut Vec<Range>, edit: &crate::helper::rewrite::LineEdit) {
+            list.retain_mut(|r| match edit.area(&r.range()) {
+                Some(new) => {
+                    r.set_range(new);
+                    true
+                }
+                None => false,
+            });
+        }
+        ranges(self.merge_cells.range_collection_mut(), edit);
+        if let Some(filter) = &self.auto_filter {
+            match edit.area(&filter.range().range()) {
+                Some(new) => self.auto_filter.as_mut().unwrap().set_range(new),
+                None => self.auto_filter = None,
+            }
+        }
+        for list in [&mut self.conditional_formatting_collection, &mut self.conditional_formatting_2010_collection] {
+            list.retain_mut(|cf| {
+                ranges(cf.sequence_of_references_mut().range_collection_mut(), edit);
+                !cf.sequence_of_references().range_collection().is_empty()
+            });
+        }
+        if let Some(v) = &mut self.data_validations {
+            v.data_validation_list_mut().retain_mut(|dv| {
+                ranges(dv.sequence_of_references_mut().range_collection_mut(), edit);
+                !dv.sequence_of_references().range_collection().is_empty()
+            });
+            if v.data_validation_list().is_empty() {
+                self.data_validations = None;
+            }
+        }
+        if let Some(v) = &mut self.data_validations_2010 {
+            v.data_validation_list_mut().retain_mut(|dv| {
+                ranges(dv.reference_sequence_mut().value_mut(), edit);
+                !dv.reference_sequence().value().is_empty()
+            });
+            if v.data_validation_list().is_empty() {
+                self.data_validations_2010 = None;
+            }
+        }
+        // Tables move when all of them lies within the band.
+        let mut headers = Vec::new();
+        self.tables.retain_mut(|t| {
+            let (a, z) = t.area();
+            let inside = match edit.axis {
+                LineAxis::Rows => edit.holds(a.col_num(), z.col_num()),
+                LineAxis::Columns => edit.holds(a.row_num(), z.row_num()),
+            };
+            if !inside {
+                return true;
+            }
+            match t.shift_lines(edit) {
+                Some(h) => {
+                    headers.extend(h);
+                    true
+                }
+                None => false,
+            }
+        });
+        for (col, row, name) in headers {
+            self.cell_mut((col, row)).set_value_string(name);
+        }
         let title = self.title.to_string();
         let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
         self.kept_relationships.rewrite_xml(&mut rw);

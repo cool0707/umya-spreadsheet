@@ -569,6 +569,30 @@ impl Cells {
         self.formatted_value_by_column_and_row(*col_num, *row_num)
     }
 
+    /// Moves the cells of the band of a [`crate::helper::rewrite::LineEdit`]
+    /// limited to one: those of the rows (columns) removed go, and so do
+    /// those pushed off the sheet.
+    pub(crate) fn shift_within(&mut self, edit: &crate::helper::rewrite::LineEdit) {
+        use crate::helper::rewrite::LineAxis;
+        self.map.retain(|_, cell| {
+            let (col, row) = (cell.coordinate().col_num(), cell.coordinate().row_num());
+            let (line, other) = match edit.axis {
+                LineAxis::Rows => (row, col),
+                LineAxis::Columns => (col, row),
+            };
+            if !edit.reaches(other) {
+                return true;
+            }
+            let Some(new) = edit.index(line) else { return false };
+            match edit.axis {
+                LineAxis::Rows => cell.coordinate_mut().set_row_num(new),
+                LineAxis::Columns => cell.coordinate_mut().set_col_num(new),
+            };
+            true
+        });
+        self.rebuild_map_and_indices();
+    }
+
     pub(crate) fn rebuild_map_and_indices(&mut self) {
         self.map = self
             .collection_to_hashmap_mut()

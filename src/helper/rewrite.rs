@@ -220,6 +220,12 @@ pub struct LineEdit {
     /// The names columns inserted into a table get: this and a number
     /// (`Column1`, `Column2`...).
     pub table_column: String,
+    /// The columns (of rows inserted or removed) or rows (of columns) the
+    /// edit is limited to, 1-based and inclusive: cells inserted or removed
+    /// with the ones below or to the right of them moving only there, as
+    /// Excel's "shift cells down" and the like do. `None`: whole rows or
+    /// columns.
+    pub band: Option<(u32, u32)>,
 }
 
 pub(crate) const MAX_ROWS: u32 = 1_048_576;
@@ -253,7 +259,32 @@ impl LineEdit {
             count,
             insert,
             table_column: "Column".to_string(),
+            band: None,
         }
+    }
+
+    /// Limits the edit to the columns `lo..=hi` (of rows inserted or
+    /// removed) or the rows `lo..=hi` (of columns): cells are inserted or
+    /// removed, and only the cells below (to the right of) them in that
+    /// band move. What does not lie within the band stays where it is:
+    /// the sizes of rows and columns, drawings, page breaks, and the
+    /// merged cells, filters, tables and other ranges that reach out of it.
+    #[must_use]
+    pub fn within(mut self, lo: u32, hi: u32) -> Self {
+        self.band = Some((lo.min(hi).max(1), lo.max(hi)));
+        self
+    }
+
+    /// Whether the edit moves what is in column (row) `other` of the axis
+    /// it is not on.
+    pub(crate) fn reaches(&self, other: u32) -> bool {
+        self.band.is_none_or(|(lo, hi)| lo <= other && other <= hi)
+    }
+
+    /// Whether the edit moves an area that spans `lo..=hi` on the axis it
+    /// is not on: all of it lies within the band.
+    pub(crate) fn holds(&self, lo: u32, hi: u32) -> bool {
+        self.band.is_none_or(|(a, b)| a <= lo.min(hi) && lo.max(hi) <= b)
     }
 
     #[must_use]
@@ -329,6 +360,14 @@ impl LineEdit {
         let (a, b) = (parse_point(a)?, parse_point(b)?);
         let (c0, r0) = (a.0.unwrap_or(1), a.1.unwrap_or(1));
         let (c1, r1) = (b.0.unwrap_or(MAX_COLS), b.1.unwrap_or(MAX_ROWS));
+        // Cells inserted or removed in a band: what reaches out of it stays.
+        let inside = match self.axis {
+            LineAxis::Rows => self.holds(c0, c1),
+            LineAxis::Columns => self.holds(r0, r1),
+        };
+        if !inside {
+            return Some(area.to_string());
+        }
         let ((c0, c1), (r0, r1)) = match self.axis {
             LineAxis::Rows if a.1.is_some() => ((c0, c1), self.span(r0, r1)?),
             LineAxis::Columns if a.0.is_some() => (self.span(c0, c1)?, (r0, r1)),
