@@ -78,6 +78,9 @@ fn is_true(v: Option<String>) -> bool {
 pub struct FilterColumn {
     column_id: UInt32Value,
     hidden_button: BooleanValue,
+    /// `showButton="0"`: the button of the column is not shown (autofilters
+    /// of sheets; tables say `hiddenButton`).
+    show_button: BooleanValue,
     criteria: Option<FilterCriteria>,
     /// What is in the `filterColumn` as read, when it filters by something
     /// `criteria` cannot say (dates grouped by year, month, day: `dateGroupItem`;
@@ -167,6 +170,7 @@ impl FilterColumn {
     ) {
         set_string_from_xml!(self, e, column_id, "colId");
         set_string_from_xml!(self, e, hidden_button, "hiddenButton");
+        set_string_from_xml!(self, e, show_button, "showButton");
         if empty_flg {
             return;
         }
@@ -237,6 +241,9 @@ impl FilterColumn {
         }
         if self.hidden_button.has_value() {
             attributes.push(("hiddenButton", self.hidden_button.value_string()).into());
+        }
+        if self.show_button.has_value() {
+            attributes.push(("showButton", self.show_button.value_string()).into());
         }
 
         // filterColumn

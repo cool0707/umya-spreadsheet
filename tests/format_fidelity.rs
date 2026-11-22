@@ -386,3 +386,32 @@ fn what_the_window_of_the_workbook_shows() {
     let workbook = part(&write(&book), "xl/workbook.xml");
     assert!(workbook.contains(r#"showSheetTabs="0""#) && workbook.contains(r#"showHorizontalScroll="0""#), "{workbook}");
 }
+
+#[test]
+fn headers_and_footers_of_the_first_and_even_pages_and_hidden_filter_buttons() {
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/worksheets/sheet1.xml" {
+            text.replace(
+                "<pageMargins",
+                r#"<autoFilter ref="A1:B9"><filterColumn colId="1" showButton="0"/></autoFilter><pageMargins"#,
+            )
+            .replace(
+                "</worksheet>",
+                r#"<headerFooter differentOddEven="1" differentFirst="1" alignWithMargins="0"><oddHeader>&amp;C奇数</oddHeader><evenHeader>&amp;C偶数</evenHeader><firstFooter>&amp;C先頭</firstFooter></headerFooter></worksheet>"#,
+            )
+        } else {
+            text
+        }
+    });
+    let sheet = part(&write(&read(&file)), "xl/worksheets/sheet1.xml");
+    for kept in [
+        r#"differentOddEven="1""#,
+        r#"differentFirst="1""#,
+        r#"alignWithMargins="0""#,
+        "<evenHeader>&amp;C偶数</evenHeader>",
+        "<firstFooter>&amp;C先頭</firstFooter>",
+        r#"showButton="0""#,
+    ] {
+        assert!(sheet.contains(kept), "{kept}: {sheet}");
+    }
+}

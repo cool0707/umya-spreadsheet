@@ -285,6 +285,9 @@ fn read_from_reader<R: io::BufRead>(
                     worksheet.cell_mut(coor).set_hyperlink(hyperlink);
                 }
             }
+            b"headerFooter" => {
+                worksheet.header_footer_mut().set_options(e);
+            }
             // How the furigana of the sheet are written (type, alignment):
             // kept as read.
             b"phoneticPr" => {
