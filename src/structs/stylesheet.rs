@@ -53,6 +53,12 @@ pub(crate) struct Stylesheet {
     /// the defaults) as read: their elements refer to the dxfs read, which
     /// keep their places.
     kept_table_styles:    Option<Box<str>>,
+    /// `colors` as read: the palette (`indexedColors`, which the indexed
+    /// colors of the cells are taken from) and the recent colors.
+    kept_colors:          Option<Box<str>>,
+    /// The font of the Normal style set by `Workbook::set_default_font`:
+    /// written as the first font, whatever the cells made of it.
+    default_font:         Option<(Box<str>, f64)>,
     /// `extLst` (slicer and timeline styles and their dxfs) as read.
     kept_ext_list:        Option<Box<str>>,
 }
@@ -261,6 +267,28 @@ impl Stylesheet {
     }
 
     #[inline]
+    /// The font of the Normal style: its name and size.
+    pub(crate) fn default_font(&self) -> Option<(String, f64)> {
+        if let Some((name, size)) = &self.default_font {
+            return Some((name.to_string(), *size));
+        }
+        let first = self.fonts.font().first()?;
+        Some((first.name().to_string(), if first.size() > 0.0 { first.size() } else { 11.0 }))
+    }
+
+    pub(crate) fn set_default_font(&mut self, name: &str, size: f64) {
+        self.default_font = Some((name.into(), size));
+    }
+
+    /// The table styles the workbook defines, with the default styles of
+    /// tables and pivot tables.
+    pub(crate) fn table_styles(&self) -> (Option<String>, Option<String>, Vec<super::CustomTableStyle>) {
+        self.kept_table_styles
+            .as_deref()
+            .map(super::custom_table_style::read)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn differential_formats(&self) -> &DifferentialFormats {
         &self.differential_formats
     }
@@ -419,6 +447,8 @@ impl Stylesheet {
 
         // format_id
         style.set_format_id(cell_format.format_id());
+        style.set_quote_prefix(cell_format.quote_prefix());
+        style.set_pivot_button(cell_format.pivot_button());
 
         // alignment
         let mut apply = true;
@@ -485,7 +515,14 @@ impl Stylesheet {
         let font_id = self.fonts.set_style(style);
         let fill_id = self.fills.set_style(style);
         let border_id = self.borders.set_style(style);
-        let format_id = 0;
+        // The cell style (`xfId`), when the stylesheet has it.
+        let format_id = if (style.format_id() as usize) < self.cell_style_formats.cell_format().len() {
+            style.format_id()
+        } else {
+            0
+        };
+        cell_format.set_quote_prefix(style.quote_prefix());
+        cell_format.set_pivot_button(style.pivot_button());
 
         cell_format.set_number_format_id(number_format_id);
         cell_format.set_font_id(font_id);
@@ -581,7 +618,7 @@ impl Stylesheet {
                         self.differential_formats.set_attributes(reader, e);
                     }
                     b"colors" => {
-                        self.colors.set_attributes(reader, e);
+                        self.kept_colors = keep(crate::reader::driver::read_raw_element(reader, e, false));
                     }
                     _ => (),
                 }
@@ -613,7 +650,16 @@ impl Stylesheet {
         self.numbering_formats.write_to(writer);
 
         // fonts
-        self.fonts.write_to(writer);
+        if let Some((name, size)) = &self.default_font {
+            let mut fonts = self.fonts.clone();
+            if let Some(first) = fonts.font_mut().first_mut() {
+                // Not the theme's font, which would win over the name.
+                first.set_name(&**name).set_size(*size).remove_scheme();
+            }
+            fonts.write_to(writer);
+        } else {
+            self.fonts.write_to(writer);
+        }
 
         // fills
         self.fills.write_to(writer);
@@ -634,7 +680,11 @@ impl Stylesheet {
         self.differential_formats.write_to(writer);
 
         // colors
-        self.colors.write_to(writer);
+        if let Some(colors) = &self.kept_colors {
+            crate::writer::driver::write_text_node_no_escape(writer, &**colors);
+        } else {
+            self.colors.write_to(writer);
+        }
 
         // tableStyles, extLst (as read)
         if let Some(table_styles) = &self.kept_table_styles {

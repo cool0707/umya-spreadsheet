@@ -184,6 +184,7 @@ pub_mod_use![
     pub string_value,
     pub style,
     pub table,
+    pub custom_table_style,
     pub text_element,
     pub time_period_values,
     pub to_marker,

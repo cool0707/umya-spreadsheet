@@ -31,6 +31,7 @@ pub struct ConnectionShape {
     non_visual_connection_shape_properties: NonVisualConnectionShapeProperties,
     shape_properties:                       ShapeProperties,
     shape_style:                            ShapeStyle,
+    r#macro:                                Option<Box<str>>,
 }
 
 impl ConnectionShape {
@@ -162,12 +163,29 @@ impl ConnectionShape {
         self.shape_style = value;
     }
 
+    /// The macro run when the object is clicked (`macro`).
+    #[inline]
+    #[must_use]
+    pub fn get_macro(&self) -> &str {
+        self.r#macro.as_deref().unwrap_or("")
+    }
+
+    #[inline]
+    pub fn set_macro<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.r#macro = Some(value.into().into_boxed_str());
+        self
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
-        _e: &BytesStart,
+        e: &BytesStart,
         drawing_relationships: Option<&RawRelationships>,
     ) {
+        // As written (escaped): the writer escapes it again.
+        self.r#macro = crate::reader::driver::get_attribute(e, b"macro").map(|v| {
+            quick_xml::escape::unescape(&v).map_or_else(|_| v.clone(), std::borrow::Cow::into_owned).into_boxed_str()
+        });
         xml_read_loop!(
             reader,
             Event::Start(ref e) => {
@@ -200,7 +218,12 @@ impl ConnectionShape {
         rel_list: &mut Vec<(String, String)>,
     ) {
         // xdr:cxnSp
-        write_start_tag(writer, "xdr:cxnSp", vec![("macro", "").into()], false);
+        write_start_tag(
+            writer,
+            "xdr:cxnSp",
+            vec![("macro", self.r#macro.as_deref().unwrap_or("")).into()],
+            false,
+        );
 
         // xdr:nvCxnSpPr
         self.non_visual_connection_shape_properties.write_to(writer);

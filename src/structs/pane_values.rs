@@ -9,9 +9,11 @@ pub enum PaneValues {
     TopRight,
 }
 impl Default for PaneValues {
+    /// What the file means when it does not say (`pane` of a selection,
+    /// `activePane` of a pane).
     #[inline]
     fn default() -> Self {
-        Self::BottomRight
+        Self::TopLeft
     }
 }
 impl EnumTrait for PaneValues {
@@ -21,7 +23,7 @@ impl EnumTrait for PaneValues {
             Self::BottomLeft => "bottomLeft",
             Self::BottomRight => "bottomRight",
             Self::TopLeft => "topLeft",
-            Self::TopRight => "TopRight",
+            Self::TopRight => "topRight",
         }
     }
 }
@@ -34,7 +36,8 @@ impl FromStr for PaneValues {
             "bottomLeft" => Ok(Self::BottomLeft),
             "bottomRight" => Ok(Self::BottomRight),
             "topLeft" => Ok(Self::TopLeft),
-            "TopRight" => Ok(Self::TopRight),
+            // ("TopRight": as this crate wrote it before.)
+            "topRight" | "TopRight" => Ok(Self::TopRight),
             _ => Err(()),
         }
     }

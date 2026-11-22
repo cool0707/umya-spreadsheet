@@ -301,7 +301,10 @@ fn write_worksheet_features(
     }
 
     worksheet.merge_cells_crate().write_to(writer);
-    write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true);
+    match worksheet.kept_relationships().xml("phoneticPr").first() {
+        Some(xml) => crate::writer::driver::write_text_node_no_escape(writer, xml),
+        None => write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true),
+    }
 
     for conditional_formatting in worksheet.conditional_formatting_collection() {
         conditional_formatting.write_to(writer, stylesheet.differential_formats_mut());
@@ -470,6 +473,9 @@ fn write_hyperlinks(writer: &mut InternalWriter, worksheet: &Worksheet) -> i32 {
             } else {
                 attributes.push(("r:id", &r_id_str).into());
                 r_id += 1;
+                if !hyperlink.target_location().is_empty() {
+                    attributes.push(("location", hyperlink.target_location()).into());
+                }
             }
             if !hyperlink.tooltip().is_empty() {
                 attributes.push(("tooltip", hyperlink.tooltip()).into());

@@ -232,6 +232,81 @@ impl PageSetup {
         self
     }
 
+    /// Whether `fitToWidth` is in the file: when it is not, Excel fits the
+    /// sheet to 1 page wide (`fit_to_width()` says 0 then, which in the file
+    /// means as many pages as needed).
+    #[inline]
+    #[must_use]
+    pub fn has_fit_to_width(&self) -> bool {
+        self.fit_to_width.has_value()
+    }
+
+    /// Whether `fitToHeight` is in the file (see `has_fit_to_width`).
+    #[inline]
+    #[must_use]
+    pub fn has_fit_to_height(&self) -> bool {
+        self.fit_to_height.has_value()
+    }
+
+    fn other(&self, name: &str) -> Option<&str> {
+        self.other_attributes.iter().find(|(k, _)| &**k == name).map(|(_, v)| &**v)
+    }
+
+    fn set_other(&mut self, name: &str, value: Option<String>) {
+        self.other_attributes.retain(|(k, _)| &**k != name);
+        if let Some(value) = value {
+            self.other_attributes.push((name.into(), value.into()));
+        }
+    }
+
+    /// Whether the sheet is printed in black and white (`blackAndWhite`).
+    #[inline]
+    #[must_use]
+    pub fn black_and_white(&self) -> bool {
+        matches!(self.other("blackAndWhite"), Some("1" | "true"))
+    }
+
+    #[inline]
+    pub fn set_black_and_white(&mut self, value: bool) -> &mut Self {
+        self.set_other("blackAndWhite", value.then(|| "1".to_string()));
+        self
+    }
+
+    /// The order the pages are printed in: `downThenOver` (the default) or
+    /// `overThenDown`.
+    #[inline]
+    #[must_use]
+    pub fn page_order(&self) -> &str {
+        self.other("pageOrder").unwrap_or("downThenOver")
+    }
+
+    #[inline]
+    pub fn set_page_order(&mut self, value: &str) -> &mut Self {
+        self.set_other(
+            "pageOrder",
+            (value != "downThenOver").then(|| value.to_string()),
+        );
+        self
+    }
+
+    /// The number of the first page, when the sheet sets one
+    /// (`useFirstPageNumber` with `firstPageNumber`); None for automatic.
+    #[inline]
+    #[must_use]
+    pub fn first_page_number(&self) -> Option<u32> {
+        if !matches!(self.other("useFirstPageNumber"), Some("1" | "true")) {
+            return None;
+        }
+        Some(self.other("firstPageNumber").and_then(|v| v.parse().ok()).unwrap_or(1))
+    }
+
+    #[inline]
+    pub fn set_first_page_number(&mut self, value: Option<u32>) -> &mut Self {
+        self.set_other("firstPageNumber", value.map(|v| v.to_string()));
+        self.set_other("useFirstPageNumber", value.map(|_| "1".to_string()));
+        self
+    }
+
     #[inline]
     pub(crate) fn has_param(&self) -> bool {
         self.paper_size.has_value()

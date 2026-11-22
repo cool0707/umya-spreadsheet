@@ -1,4 +1,6 @@
 # umya-spreadsheet
+
+> This is the fork xljs and RAS use (branch `excel-compat`): what it adds and what it still lacks are in [FORK.md](FORK.md).
 ![Result Image](./images/title.png)
 
 [![Crates.io](https://img.shields.io/crates/v/umya-spreadsheet)](https://crates.io/crates/umya-spreadsheet)

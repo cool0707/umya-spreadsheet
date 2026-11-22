@@ -94,10 +94,10 @@ impl AutoFilter {
         xml_read_loop!(
             reader,
             ref n @ (Event::Empty(ref e) | Event::Start(ref e)) => {
-                let _is_empty = matches!(n, Event::Empty(_));
+                let is_empty = matches!(n, Event::Empty(_));
                 if e.name().into_inner() == b"filterColumn" {
                     let mut obj = FilterColumn::default();
-                    obj.set_attributes(reader, e);
+                    obj.set_attributes(reader, e, is_empty);
                     self.add_filter_column(obj);
                 }
             },

@@ -81,3 +81,6 @@ pub use self::non_visual_group_shape_drawing_properties::*;
 
 mod kept_anchor;
 pub use self::kept_anchor::*;
+
+mod client_data;
+pub use self::client_data::*;

@@ -41,6 +41,8 @@ pub(crate) struct CellFormat {
     apply_font:          BooleanValue,
     apply_alignment:     BooleanValue,
     apply_protection:    BooleanValue,
+    quote_prefix:        BooleanValue,
+    pivot_button:        BooleanValue,
     alignment:           Option<Alignment>,
     protection:          Option<Protection>,
 }
@@ -258,6 +260,31 @@ impl CellFormat {
         self
     }
 
+    /// The text of the cell was typed with an apostrophe before it
+    /// (`quotePrefix`): it stays text even when it looks like a number.
+    #[inline]
+    pub(crate) fn quote_prefix(&self) -> bool {
+        self.quote_prefix.value()
+    }
+
+    #[inline]
+    pub(crate) fn set_quote_prefix(&mut self, value: bool) -> &mut Self {
+        self.quote_prefix.set_value(value);
+        self
+    }
+
+    /// The cell shows the button of a field of a pivot table.
+    #[inline]
+    pub(crate) fn pivot_button(&self) -> bool {
+        self.pivot_button.value()
+    }
+
+    #[inline]
+    pub(crate) fn set_pivot_button(&mut self, value: bool) -> &mut Self {
+        self.pivot_button.set_value(value);
+        self
+    }
+
     #[inline]
     pub(crate) fn has_apply_protection(&self) -> bool {
         self.apply_protection.has_value()
@@ -341,6 +368,8 @@ impl CellFormat {
         set_string_from_xml!(self, e, apply_fill, "applyFill");
         set_string_from_xml!(self, e, apply_alignment, "applyAlignment");
         set_string_from_xml!(self, e, apply_protection, "applyProtection");
+        set_string_from_xml!(self, e, quote_prefix, "quotePrefix");
+        set_string_from_xml!(self, e, pivot_button, "pivotButton");
 
         if empty_flag {
             return;
@@ -414,6 +443,12 @@ impl CellFormat {
         }
         if self.apply_protection.has_value() {
             attributes.push(("applyProtection", self.apply_protection.value_string()).into());
+        }
+        if self.quote_prefix.value() {
+            attributes.push(("quotePrefix", "1").into());
+        }
+        if self.pivot_button.value() {
+            attributes.push(("pivotButton", "1").into());
         }
         write_start_tag(writer, "xf", attributes, empty_flag);
 

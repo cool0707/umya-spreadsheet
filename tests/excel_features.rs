@@ -262,3 +262,112 @@ fn furigana_can_be_set_and_read() {
     let cell = book.sheet_by_name("その他").unwrap().cell("E1").unwrap();
     assert_eq!(cell.cell_value().phonetic_runs(), [(0, 2, "トウキョウ".to_string())]);
 }
+
+/// The ActiveX controls of a sheet (`xl/activeX`, the `control` of the
+/// sheet's `controls`) were dropped while the sheet kept referring to them:
+/// the `r:id` of the control pointed at no relationship. `activeX_controls.xlsm`
+/// is RAS's test workbook (`crates/ras-workbook/src/view/tests.rs`): form
+/// controls, an ActiveX CommandButton, a chart and a picture.
+#[test]
+fn activex_controls_survive_a_round_trip() {
+    let before = parts(&file("activex_controls.xlsm"));
+    let after = parts(&write(&read(&file("activex_controls.xlsm"))));
+    for part in ["xl/activeX/activeX1.xml", "xl/activeX/activeX1.bin"] {
+        assert!(after.contains_key(part), "{part}: {:?}", after.keys().collect::<Vec<_>>());
+    }
+    assert_eq!(after["xl/activeX/activeX1.bin"], before["xl/activeX/activeX1.bin"]);
+    let sheet = &after["xl/worksheets/sheet1.xml"];
+    let rels = &after[&rels_of("xl/worksheets/sheet1.xml")];
+    for id in values(sheet, "r:id") {
+        assert!(rels.contains(&format!("Id=\"{id}\"")), "{id} is not a relationship of the sheet");
+    }
+    assert!(sheet.contains(r#"name="CommandButton1""#));
+}
+
+/// The picture Excel keeps of an ActiveX control (the `r:id` of its
+/// `controlPr`, an image of the sheet) goes with it.
+#[test]
+fn the_picture_of_an_activex_control_goes_with_it() {
+    use std::io::Write as _;
+    let source = file("activex_controls.xlsm");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&source)).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let name = f.name().to_string();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        if name == "xl/worksheets/sheet1.xml" {
+            let text = String::from_utf8(data).unwrap().replacen(
+                r#"<control shapeId="1026" r:id="rId4" name="CommandButton1"><controlPr defaultSize="0" autoLine="0">"#,
+                r#"<control shapeId="1026" r:id="rId4" name="CommandButton1"><controlPr defaultSize="0" autoLine="0" r:id="rId90">"#,
+                1,
+            );
+            assert!(text.contains("rId90"));
+            data = text.into_bytes();
+        } else if name == "xl/worksheets/_rels/sheet1.xml.rels" {
+            data = String::from_utf8(data)
+                .unwrap()
+                .replace(
+                    "</Relationships>",
+                    r#"<Relationship Id="rId90" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image90.emf"/></Relationships>"#,
+                )
+                .into_bytes();
+        }
+        out.start_file(name, options).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    out.start_file("xl/media/image90.emf", options).unwrap();
+    out.write_all(b"EMF of the control").unwrap();
+    let edited = out.finish().unwrap().into_inner();
+
+    let after = parts(&write(&read(&edited)));
+    let sheet = &after["xl/worksheets/sheet1.xml"];
+    let rels = &after[&rels_of("xl/worksheets/sheet1.xml")];
+    for id in values(sheet, "r:id") {
+        assert!(rels.contains(&format!("Id=\"{id}\"")), "{id} is not a relationship of the sheet");
+    }
+    assert!(after.values().any(|d| d == "EMF of the control"));
+}
+
+/// A SmartArt diagram (the parts of `xl/diagrams` its frame refers to) was
+/// dropped. RAS's test workbook has its data and drawing; the layout, the
+/// quick style and the colors are added here as Excel would have them.
+#[test]
+fn smartart_survives_a_round_trip() {
+    use std::io::Write as _;
+    let source = file("activex_controls.xlsm");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&source)).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let name = f.name().to_string();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        out.start_file(name, options).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    let dgm = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+    for (part, root) in [("layout1.xml", "layoutDef"), ("quickStyle1.xml", "styleDef"), ("colors1.xml", "colorsDef")] {
+        out.start_file(format!("xl/diagrams/{part}"), options).unwrap();
+        write!(out, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><dgm:{root} xmlns:dgm="{dgm}" uniqueId="{part}"/>"#).unwrap();
+    }
+    let edited = out.finish().unwrap().into_inner();
+
+    let after = parts(&write(&read(&edited)));
+    for part in ["xl/diagrams/data1.xml", "xl/diagrams/layout1.xml", "xl/diagrams/quickStyle1.xml", "xl/diagrams/colors1.xml"] {
+        assert!(after.contains_key(part), "{part}: {:?}", after.keys().collect::<Vec<_>>());
+    }
+    let drawing = &after["xl/drawings/drawing1.xml"];
+    let rels = &after[&rels_of("xl/drawings/drawing1.xml")];
+    assert!(drawing.contains("drawingml/2006/diagram"));
+    for attr in ["r:dm", "r:lo", "r:qs", "r:cs"] {
+        for id in values(drawing, attr) {
+            assert!(rels.contains(&format!("Id=\"{id}\"")), "{attr}={id} is not a relationship of the drawing");
+        }
+    }
+    // The chart of the same drawing is still there.
+    assert!(after.keys().any(|k| k.starts_with("xl/charts/chart")));
+}

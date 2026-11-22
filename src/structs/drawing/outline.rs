@@ -47,6 +47,8 @@ pub struct Outline {
     solid_fill:         Option<Box<SolidFill>>,
     gradient_fill:      Option<Box<GradientFill>>,
     tail_end:           Option<Box<TailEnd>>,
+    /// The end at the start of the line (`a:headEnd`: an arrow, an oval...).
+    head_end:           Option<Box<TailEnd>>,
     no_fill:            Option<NoFill>,
     bevel:              Option<Box<Bevel>>,
     preset_dash:        Option<PresetDash>,
@@ -201,6 +203,19 @@ impl Outline {
     #[inline]
     pub fn set_tail_end(&mut self, value: TailEnd) -> &mut Self {
         self.tail_end = Some(Box::new(value));
+        self
+    }
+
+    /// The end at the start of the line (an arrow, an oval...).
+    #[inline]
+    #[must_use]
+    pub fn head_end(&self) -> Option<&TailEnd> {
+        self.head_end.as_deref()
+    }
+
+    #[inline]
+    pub fn set_head_end(&mut self, value: TailEnd) -> &mut Self {
+        self.head_end = Some(Box::new(value));
         self
     }
 
@@ -447,6 +462,12 @@ impl Outline {
                         obj.set_attributes(reader, e, is_empty);
                         self.set_tail_end(obj);
                     }
+                    b"a:headEnd" => {
+                        // (It has no content: read as empty.)
+                        let mut obj = TailEnd::default();
+                        obj.set_attributes(reader, e, true);
+                        self.set_head_end(obj);
+                    }
                     b"a:noFill" => {
                         let obj = NoFill::default();
                         NoFill::set_attributes(reader, e, is_empty);
@@ -520,6 +541,11 @@ impl Outline {
         // a:round
         if self.round.is_some() {
             Round::write_to(writer);
+        }
+
+        // a:headEnd
+        if let Some(v) = &self.head_end {
+            v.write_tag(writer, "a:headEnd");
         }
 
         // a:tailEnd

@@ -198,3 +198,47 @@ fn copies_of_sheets_with_names_and_tables() {
     assert_eq!(book.sheet(2).unwrap().defined_names()[0].local_sheet_id(), 2);
     assert_eq!(book.sheet(0).unwrap().defined_names()[0].local_sheet_id(), 0);
 }
+
+#[test]
+fn cells_inserted_and_removed_in_a_band() {
+    let mut book = umya_spreadsheet::new_file();
+    let sheet = book.sheet_mut(0).unwrap();
+    for row in 1..=4u32 {
+        for col in 1..=3u32 {
+            sheet.cell_mut((col, row)).set_value_number(f64::from(row * 10 + col));
+        }
+    }
+    sheet.style_mut("B2").font_mut().set_bold(true);
+    sheet.add_merge_cells("B3:B4");
+    sheet.add_merge_cells("A3:B3");
+    let mut comment = umya_spreadsheet::Comment::default();
+    comment.new_comment("B2");
+    sheet.add_comments(comment);
+    // Two cells inserted at B2:B3, the cells below them in column B moving down.
+    book.edit_lines("Sheet1", &LineEdit::insert_rows(2, 2).within(2, 2), &mut |_, _| None).unwrap();
+    let sheet = book.sheet(0).unwrap();
+    assert_eq!(sheet.value("B1"), "12");
+    assert_eq!(sheet.value("B2"), "");
+    assert_eq!(sheet.value("B4"), "22");
+    assert_eq!(sheet.value("B6"), "42");
+    assert!(sheet.style("B4").font().is_some_and(|f| f.bold()));
+    // The other columns stay.
+    assert_eq!(sheet.value("A2"), "21");
+    assert_eq!(sheet.value("C4"), "43");
+    assert_eq!(sheet.comments()[0].coordinate().to_string(), "B4");
+    // A merged cell within the band moves; one that reaches out of it stays.
+    let merged: Vec<String> = sheet.merge_cells().iter().map(|m| m.range()).collect();
+    assert_eq!(merged, ["B5:B6", "A3:B3"]);
+
+    // Removed again, the cells moving up; then a cell of row 1 removed, the row moving left.
+    book.edit_lines("Sheet1", &LineEdit::remove_rows(2, 2).within(2, 2), &mut |_, _| None).unwrap();
+    book.edit_lines("Sheet1", &LineEdit::remove_columns(1, 1).within(1, 1), &mut |_, _| None).unwrap();
+    let sheet = book.sheet(0).unwrap();
+    assert_eq!(sheet.value("B2"), "22");
+    assert_eq!(sheet.value("B4"), "42");
+    assert_eq!(sheet.comments()[0].coordinate().to_string(), "B2");
+    assert_eq!(sheet.value("A1"), "12");
+    assert_eq!(sheet.value("B1"), "13");
+    assert_eq!(sheet.value("C1"), "");
+    assert_eq!(sheet.value("A2"), "21");
+}

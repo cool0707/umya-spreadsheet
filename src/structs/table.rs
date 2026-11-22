@@ -19,7 +19,12 @@ pub struct Table {
     style_info:       Option<Box<TableStyleInfo>>,
     totals_row_shown: BooleanValue,
     totals_row_count: UInt32Value,
+    header_row_count: UInt32Value,
     auto_filter:      AutoFilter,
+    /// The attributes of `table` not modelled above, as read: the formats of
+    /// its parts (`headerRowDxfId`, `dataDxfId`, `totalsRowDxfId`, the
+    /// border ones, the cell styles), `insertRow`, `tableType`...
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 impl Table {
     #[inline]
@@ -40,7 +45,9 @@ impl Table {
             style_info:       None,
             totals_row_shown: BooleanValue::default(),
             totals_row_count: UInt32Value::default(),
+            header_row_count: UInt32Value::default(),
             auto_filter,
+            other_attributes: Vec::new(),
         }
     }
 
@@ -309,6 +316,44 @@ impl Table {
         self.totals_row_count.set_value_string(value);
     }
 
+    /// The number of header rows: 1, or 0 for a table without one (its
+    /// first row is data).
+    #[inline]
+    #[must_use]
+    pub fn header_row_count(&self) -> u32 {
+        if self.header_row_count.has_value() {
+            self.header_row_count.value()
+        } else {
+            1
+        }
+    }
+
+    #[inline]
+    pub fn set_header_row_count(&mut self, value: u32) {
+        if value == 1 {
+            self.header_row_count = UInt32Value::default();
+        } else {
+            self.header_row_count.set_value(value);
+        }
+    }
+
+    #[inline]
+    pub(crate) fn has_header_row_count(&self) -> bool {
+        self.header_row_count.has_value()
+    }
+
+    /// The attributes of the table that are kept as read (see the field).
+    #[inline]
+    #[must_use]
+    pub fn other_attributes(&self) -> &[(Box<str>, Box<str>)] {
+        &self.other_attributes
+    }
+
+    #[inline]
+    pub(crate) fn add_other_attribute(&mut self, key: &str, value: &str) {
+        self.other_attributes.push((key.into(), value.into()));
+    }
+
     #[inline]
     #[must_use]
     pub fn auto_filter(&self) -> &AutoFilter {
@@ -351,17 +396,32 @@ pub struct TableColumn {
     totals_row_label:          StringValue,
     totals_row_function:       EnumValue<TotalsRowFunctionValues>,
     calculated_column_formula: Option<String>,
+    /// The formula of the total row (with whether it is an array formula).
+    totals_row_formula:        Option<(String, bool)>,
+    /// The attributes of `tableColumn` not modelled above, as read
+    /// (`dataDxfId`, `totalsRowDxfId`, the cell styles, `queryTableFieldId`...).
+    other_attributes:          Vec<(Box<str>, Box<str>)>,
 }
 impl TableColumn {
     pub(crate) fn rename_sheet(&mut self, rename: &crate::helper::sheet_rename::SheetRename) {
         if let Some(new) = self.calculated_column_formula.as_deref().and_then(|f| rename.formula(f)) {
             self.calculated_column_formula = Some(new);
         }
+        if let Some((formula, _)) = &mut self.totals_row_formula {
+            if let Some(new) = rename.formula(formula) {
+                *formula = new;
+            }
+        }
     }
 
     pub(crate) fn rewrite_formulas(&mut self, host: Option<&str>, f: &mut crate::helper::rewrite::FormulaFn<'_>) {
         if let Some(new) = self.calculated_column_formula.as_deref().and_then(|v| f(host, v)) {
             self.calculated_column_formula = Some(new);
+        }
+        if let Some((formula, _)) = &mut self.totals_row_formula {
+            if let Some(new) = f(host, formula) {
+                *formula = new;
+            }
         }
     }
 
@@ -373,6 +433,8 @@ impl TableColumn {
             totals_row_label:          StringValue::default(),
             totals_row_function:       EnumValue::default(),
             calculated_column_formula: None,
+            totals_row_formula:        None,
+            other_attributes:          Vec::new(),
         }
     }
 
@@ -490,6 +552,31 @@ impl TableColumn {
     #[inline]
     pub(crate) fn set_calculated_column_formula(&mut self, value: String) {
         self.calculated_column_formula = Some(value);
+    }
+
+    /// The formula of the total row (`totalsRowFunction` "custom"), and
+    /// whether it is an array formula.
+    #[inline]
+    #[must_use]
+    pub fn totals_row_formula(&self) -> Option<(&str, bool)> {
+        self.totals_row_formula.as_ref().map(|(f, array)| (f.as_str(), *array))
+    }
+
+    #[inline]
+    pub(crate) fn set_totals_row_formula(&mut self, value: String, array: bool) {
+        self.totals_row_formula = Some((value, array));
+    }
+
+    /// The attributes of the column that are kept as read (see the field).
+    #[inline]
+    #[must_use]
+    pub fn other_attributes(&self) -> &[(Box<str>, Box<str>)] {
+        &self.other_attributes
+    }
+
+    #[inline]
+    pub(crate) fn add_other_attribute(&mut self, key: &str, value: &str) {
+        self.other_attributes.push((key.into(), value.into()));
     }
 }
 

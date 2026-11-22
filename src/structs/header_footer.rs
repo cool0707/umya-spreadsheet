@@ -26,6 +26,13 @@ use crate::{
 pub struct HeaderFooter {
     odd_header: OddHeader,
     odd_footer: OddFooter,
+    /// `differentOddEven`, `differentFirst`, `scaleWithDoc`,
+    /// `alignWithMargins`, as read.
+    other_attributes: Vec<(Box<str>, Box<str>)>,
+    /// The headers and footers of even pages and of the first page
+    /// (`evenHeader`, `evenFooter`, `firstHeader`, `firstFooter`) that have
+    /// something in them, as read.
+    kept: Vec<Box<str>>,
 }
 
 impl HeaderFooter {
@@ -91,14 +98,30 @@ impl HeaderFooter {
 
     #[inline]
     pub(crate) fn has_param(&self) -> bool {
-        self.odd_header.has_param() || self.odd_footer.has_param()
+        self.odd_header.has_param()
+            || self.odd_footer.has_param()
+            || !self.other_attributes.is_empty()
+            || !self.kept.is_empty()
+    }
+
+    /// Reads the attributes of `headerFooter` (also when it is empty).
+    pub(crate) fn set_options(&mut self, e: &BytesStart) {
+        for attr in e.attributes().with_checks(false).flatten() {
+            let key = attr.key.into_inner();
+            if matches!(key, b"differentOddEven" | b"differentFirst" | b"scaleWithDoc" | b"alignWithMargins") {
+                if let Ok(value) = crate::reader::driver::get_attribute_value(&attr) {
+                    self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into()));
+                }
+            }
+        }
     }
 
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
-        _e: &BytesStart,
+        e: &BytesStart,
     ) {
+        self.set_options(e);
         xml_read_loop!(
             reader,
             Event::Start(ref e) => {
@@ -108,6 +131,10 @@ impl HeaderFooter {
                 }
                 b"oddFooter" => {
                     self.odd_footer.set_attributes(reader, e);
+                }
+                b"evenHeader" | b"evenFooter" | b"firstHeader" | b"firstFooter" => {
+                    let xml = crate::reader::driver::read_raw_element(reader, e, false);
+                    self.kept.push(xml.into());
                 }
                 _ => (),
                 }
@@ -124,13 +151,20 @@ impl HeaderFooter {
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
         if self.has_param() {
             // headerFooter
-            write_start_tag(writer, "headerFooter", vec![], false);
+            let attributes: crate::structs::AttrCollection =
+                self.other_attributes.iter().map(|(k, v)| (&**k, &**v).into()).collect();
+            write_start_tag(writer, "headerFooter", attributes, false);
 
             // oddHeader
             self.odd_header().write_to(writer);
 
             // oddFooter
             self.odd_footer().write_to(writer);
+
+            // evenHeader, evenFooter, firstHeader, firstFooter (as read, in order)
+            for xml in &self.kept {
+                crate::writer::driver::write_text_node_no_escape(writer, &**xml);
+            }
 
             write_end_tag(writer, "headerFooter");
         }

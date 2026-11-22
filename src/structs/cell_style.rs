@@ -24,6 +24,10 @@ pub struct CellStyle {
     name:       StringValue,
     builtin_id: UInt32Value,
     format_id:  UInt32Value,
+    /// Not shown among the cell styles (`hidden`), and a built-in style
+    /// changed (`customBuiltin`).
+    hidden:         Option<bool>,
+    custom_builtin: Option<bool>,
 }
 
 impl CellStyle {
@@ -93,6 +97,11 @@ impl CellStyle {
         set_string_from_xml!(self, e, name, "name");
         set_string_from_xml!(self, e, builtin_id, "builtinId");
         set_string_from_xml!(self, e, format_id, "xfId");
+        let flag = |name: &[u8]| {
+            get_attribute(e, name).map(|v| matches!(v.as_str(), "1" | "true"))
+        };
+        self.hidden = flag(b"hidden");
+        self.custom_builtin = flag(b"customBuiltin");
     }
 
     #[inline]
@@ -104,6 +113,13 @@ impl CellStyle {
         attributes.push(("xfId", &format_id).into());
         let builtin_id = self.builtin_id.value_string();
         attributes.push(("builtinId", &builtin_id).into());
+        let text = |v: bool| if v { "1" } else { "0" };
+        if let Some(v) = self.hidden {
+            attributes.push(("hidden", text(v)).into());
+        }
+        if let Some(v) = self.custom_builtin {
+            attributes.push(("customBuiltin", text(v)).into());
+        }
         write_start_tag(writer, "cellStyle", attributes, true);
     }
 }

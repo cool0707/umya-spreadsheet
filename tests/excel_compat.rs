@@ -197,3 +197,53 @@ fn strings_escaped_by_excel_are_read_back() {
     let book = read(out.get_ref());
     assert_eq!(book.sheet(0).unwrap().value("A1"), "a\u{1}b _x000D_\nc\r");
 }
+
+/// What the model of a drawing did not read was lost when the workbook was
+/// saved: the start of a line (an oval), a reflection, "do not print" on an
+/// object, the alternative text of a picture, the underline and the
+/// superscript of a run.
+#[test]
+fn drawings_keep_what_their_objects_look_like() {
+    let shapes = parts(&write(&read(&file("drawing_shapes.xlsx"))));
+    let drawing = &shapes["xl/drawings/drawing1.xml"];
+    for kept in [
+        r#"<a:headEnd type="oval"/>"#,
+        r#"<a:reflection blurRad="6350" stA="53000" endA="300" endPos="35500" dist="12700" dir="5400000" sy="-90000" algn="bl" rotWithShape="0"/>"#,
+        r#"<xdr:clientData fPrintsWithSheet="0"/>"#,
+    ] {
+        assert!(drawing.contains(kept), "{kept}");
+    }
+    let picture = parts(&write(&read(&file("drawing_picture.xlsx"))));
+    assert!(picture["xl/drawings/drawing1.xml"].contains(r#"descr="Picture""#));
+
+    let mut book = read(&file("drawing_shapes.xlsx"));
+    let anchors = book.sheet_mut(0).unwrap().worksheet_drawing_mut().two_cell_anchor_collection_mut();
+    assert!(anchors.iter().any(|a| !a.client_data().prints_with_sheet()));
+}
+
+/// The macros of pictures and connectors (`macro` of `xdr:pic`, `xdr:cxnSp`),
+/// the apostrophe of text typed with one (`quotePrefix`) and the cell styles
+/// of the cells (`xfId`) were lost when saving.
+#[test]
+fn macros_of_pictures_and_what_cells_were_typed_with() {
+    let mut book = read(&file("activex_controls.xlsm"));
+    // (The model keeps pictures as images of the sheet.)
+    let image = &mut book.sheet_mut(0).unwrap().image_collection_mut()[0];
+    let pic = match image.two_cell_anchor_mut() {
+        Some(anchor) => anchor.picture_mut(),
+        None => image.one_cell_anchor_mut().and_then(|a| a.picture_mut()),
+    }
+    .unwrap();
+    pic.set_macro("'Book1.xlsm'!Module1.Run");
+    let ws = book.sheet_mut(0).unwrap();
+    ws.cell_mut("A1").set_value("001").style_mut().set_quote_prefix(true);
+    let saved = write(&book);
+    let p = parts(&saved);
+    assert!(p["xl/drawings/drawing1.xml"].contains(r#"<xdr:pic macro="&apos;Book1.xlsm&apos;!Module1.Run">"#) || p["xl/drawings/drawing1.xml"].contains(r#"<xdr:pic macro="'Book1.xlsm'!Module1.Run">"#), "{}", p["xl/drawings/drawing1.xml"]);
+    assert!(p["xl/styles.xml"].contains(r#"quotePrefix="1""#));
+    let again = read(&saved);
+    assert!(again.sheet(0).unwrap().cell("A1").unwrap().style().quote_prefix());
+    let again = parts(&write(&again));
+    assert!(again["xl/drawings/drawing1.xml"].contains("Module1.Run"));
+    assert!(!again["xl/drawings/drawing1.xml"].contains("&amp;apos;"));
+}

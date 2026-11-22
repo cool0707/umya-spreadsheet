@@ -65,6 +65,13 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         if table.has_totals_row_count() {
             attributes.push(("totalsRowCount", totals_row_count_str).into());
         }
+        let header_row_count = table.header_row_count().to_string();
+        if table.has_header_row_count() {
+            attributes.push(("headerRowCount", &header_row_count).into());
+        }
+        for (k, v) in table.other_attributes() {
+            attributes.push((&**k, &**v).into());
+        }
         write_start_tag(&mut writer, "table", attributes, false);
 
         // autoFilter
@@ -91,17 +98,26 @@ pub(crate) fn write<W: io::Seek + io::Write>(
             attributes.push(("name", col.name()).into());
             attributes.push(("totalsRowLabel", col.totals_row_label_str()).into());
             attributes.push(("totalsRowFunction", col.totals_row_function_str()).into());
-            match col.calculated_column_formula() {
-                Some(v) => {
-                    write_start_tag(&mut writer, "tableColumn", attributes, false);
+            for (k, v) in col.other_attributes() {
+                attributes.push((&**k, &**v).into());
+            }
+            if col.calculated_column_formula().is_none() && col.totals_row_formula().is_none() {
+                write_start_tag(&mut writer, "tableColumn", attributes, true);
+            } else {
+                write_start_tag(&mut writer, "tableColumn", attributes, false);
+                if let Some(v) = col.calculated_column_formula() {
                     write_start_tag(&mut writer, "calculatedColumnFormula", vec![], false);
                     write_text_node(&mut writer, v);
                     write_end_tag(&mut writer, "calculatedColumnFormula");
-                    write_end_tag(&mut writer, "tableColumn");
                 }
-                None => {
-                    write_start_tag(&mut writer, "tableColumn", attributes, true);
+                if let Some((v, array)) = col.totals_row_formula() {
+                    let attributes: crate::structs::AttrCollection =
+                        if array { vec![("array", "1").into()] } else { vec![] };
+                    write_start_tag(&mut writer, "totalsRowFormula", attributes, false);
+                    write_text_node(&mut writer, v);
+                    write_end_tag(&mut writer, "totalsRowFormula");
                 }
+                write_end_tag(&mut writer, "tableColumn");
             }
 
             col_id += 1;

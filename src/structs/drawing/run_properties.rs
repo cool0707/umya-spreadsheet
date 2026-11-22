@@ -54,9 +54,20 @@ pub struct RunProperties {
     gradient_fill:        Option<Box<GradientFill>>,
     no_fill:              Option<NoFill>,
     effect_list:          Option<Box<EffectList>>,
+    /// The attributes not modelled above, as read (`u` underline,
+    /// `baseline` superscript and subscript, `kern`, `dirty`, `err`...).
+    other_attributes:     Vec<(Box<str>, Box<str>)>,
 }
 
 impl RunProperties {
+    /// An attribute not modelled otherwise (`u`, `baseline`, `kern`...), as
+    /// written in the file.
+    #[inline]
+    #[must_use]
+    pub fn other_attribute(&self, name: &str) -> Option<&str> {
+        self.other_attributes.iter().find(|(k, _)| &**k == name).map(|(_, v)| &**v)
+    }
+
     #[inline]
     #[must_use]
     pub fn text(&self) -> &str {
@@ -520,6 +531,18 @@ impl RunProperties {
         if let Some(v) = get_attribute(e, b"spc") {
             self.spacing.set_value_string(v);
         }
+        for attr in e.attributes().with_checks(false).flatten() {
+            let key = attr.key.into_inner();
+            if matches!(key, b"kumimoji" | b"lang" | b"altLang" | b"b" | b"sz" | b"strike" | b"i" | b"cap" | b"spc")
+                || key.contains(&b':')
+                || key.starts_with(b"xmlns")
+            {
+                continue;
+            }
+            if let Ok(value) = crate::reader::driver::get_attribute_value(&attr) {
+                self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into()));
+            }
+        }
 
         if empty_flag {
             return;
@@ -630,6 +653,9 @@ impl RunProperties {
         }
         if self.strike.has_value() {
             attributes.push(("strike", self.strike.value_str()).into());
+        }
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
         }
         if self.solid_fill.is_some()
             || self.outline.is_some()

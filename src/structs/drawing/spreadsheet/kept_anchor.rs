@@ -32,14 +32,16 @@ use crate::structs::{
 
 /// The `uri` of the `a:graphicData` of a chart, of a chart of the newer
 /// kinds (chartEx: waterfall, treemap, sunburst, histogram, box and whisker,
-/// funnel, map), and of the frames of slicers (of a pivot table, of a table)
-/// and timelines, which the model has no part for either.
-const CHART_URIS: [&[u8]; 5] = [
+/// funnel, map), of the frames of slicers (of a pivot table, of a table)
+/// and timelines, and of `SmartArt` diagrams, which the model has no part for
+/// either.
+const CHART_URIS: [&[u8]; 6] = [
     b"http://schemas.openxmlformats.org/drawingml/2006/chart",
     b"http://schemas.microsoft.com/office/drawing/2014/chartex",
     b"http://schemas.microsoft.com/office/drawing/2010/slicer",
     b"http://schemas.microsoft.com/office/drawing/2012/slicer",
     b"http://schemas.microsoft.com/office/drawing/2012/timeslicer",
+    b"http://schemas.openxmlformats.org/drawingml/2006/diagram",
 ];
 
 /// What stands for the `n`-th relationship in the XML kept: replaced by the
@@ -178,18 +180,21 @@ pub(crate) fn take_charts(
                     depth += 1;
                 } else if depth == 1 && has_chart {
                     let end = reader.buffer_position();
-                    let anchor = KeptAnchor::new(
+                    // (One that refers to a part the file does not have is
+                    // left to the model.)
+                    if let Some(anchor) = KeptAnchor::new(
                         &data[usize::try_from(child_start).ok()?..usize::try_from(end).ok()?],
                         &root_namespaces,
                         &rel_attributes,
                         &relationships,
                         store,
-                    )?;
-                    taken.push((
-                        usize::try_from(child_start).ok()?,
-                        usize::try_from(end).ok()?,
-                        anchor,
-                    ));
+                    ) {
+                        taken.push((
+                            usize::try_from(child_start).ok()?,
+                            usize::try_from(end).ok()?,
+                            anchor,
+                        ));
+                    }
                 }
             }
             Event::End(_) => {
@@ -198,14 +203,15 @@ pub(crate) fn take_charts(
                     let end = reader.buffer_position();
                     let start = usize::try_from(child_start).ok()?;
                     let end = usize::try_from(end).ok()?;
-                    let anchor = KeptAnchor::new(
+                    if let Some(anchor) = KeptAnchor::new(
                         &data[start..end],
                         &root_namespaces,
                         &rel_attributes,
                         &relationships,
                         store,
-                    )?;
-                    taken.push((start, end, anchor));
+                    ) {
+                        taken.push((start, end, anchor));
+                    }
                     has_chart = false;
                 }
             }
