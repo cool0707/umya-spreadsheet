@@ -285,6 +285,12 @@ fn read_from_reader<R: io::BufRead>(
                     worksheet.cell_mut(coor).set_hyperlink(hyperlink);
                 }
             }
+            // How the furigana of the sheet are written (type, alignment):
+            // kept as read.
+            b"phoneticPr" => {
+                let xml = crate::reader::driver::read_raw_element(&mut reader, e, true);
+                worksheet.kept_relationships_mut().add_xml("phoneticPr", xml);
+            }
             b"printOptions" => {
                 worksheet
                     .print_options_mut()

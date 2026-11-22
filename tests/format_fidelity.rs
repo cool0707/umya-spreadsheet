@@ -336,3 +336,18 @@ fn the_palette_of_the_workbook() {
     let styles = part(&write(&read(&file)), "xl/styles.xml");
     assert!(styles.contains(colors), "{styles}");
 }
+
+#[test]
+fn how_furigana_are_written() {
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/worksheets/sheet1.xml" {
+            text.replacen(r#"<phoneticPr fontId="1"/>"#, r#"<phoneticPr fontId="1" type="noConversion"/>"#, 1)
+        } else {
+            text
+        }
+    });
+    assert!(part(&file, "xl/worksheets/sheet1.xml").contains(r#"type="noConversion""#));
+    let sheet = part(&write(&read(&file)), "xl/worksheets/sheet1.xml");
+    assert!(sheet.contains(r#"type="noConversion""#), "{sheet}");
+    assert_eq!(sheet.matches("<phoneticPr").count(), 1, "{sheet}");
+}

@@ -196,7 +196,7 @@ impl SharedStringItem {
             Event::End(ref e) => {
                 if e.name().into_inner() == end {
                     // Only the default without furigana: as if there were none.
-                    if phonetic.contains("<rPh") {
+                    if phonetic.contains("<rPh") || phonetic.contains(" type=") || phonetic.contains(" alignment=") {
                         self.phonetic = Some(phonetic.into());
                     }
                     if !vec_text_element.is_empty() {
