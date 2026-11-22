@@ -330,3 +330,44 @@ fn the_picture_of_an_activex_control_goes_with_it() {
     }
     assert!(after.values().any(|d| d == "EMF of the control"));
 }
+
+/// A SmartArt diagram (the parts of `xl/diagrams` its frame refers to) was
+/// dropped. RAS's test workbook has its data and drawing; the layout, the
+/// quick style and the colors are added here as Excel would have them.
+#[test]
+fn smartart_survives_a_round_trip() {
+    use std::io::Write as _;
+    let source = file("activex_controls.xlsm");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&source)).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let name = f.name().to_string();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        out.start_file(name, options).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    let dgm = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+    for (part, root) in [("layout1.xml", "layoutDef"), ("quickStyle1.xml", "styleDef"), ("colors1.xml", "colorsDef")] {
+        out.start_file(format!("xl/diagrams/{part}"), options).unwrap();
+        write!(out, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><dgm:{root} xmlns:dgm="{dgm}" uniqueId="{part}"/>"#).unwrap();
+    }
+    let edited = out.finish().unwrap().into_inner();
+
+    let after = parts(&write(&read(&edited)));
+    for part in ["xl/diagrams/data1.xml", "xl/diagrams/layout1.xml", "xl/diagrams/quickStyle1.xml", "xl/diagrams/colors1.xml"] {
+        assert!(after.contains_key(part), "{part}: {:?}", after.keys().collect::<Vec<_>>());
+    }
+    let drawing = &after["xl/drawings/drawing1.xml"];
+    let rels = &after[&rels_of("xl/drawings/drawing1.xml")];
+    assert!(drawing.contains("drawingml/2006/diagram"));
+    for attr in ["r:dm", "r:lo", "r:qs", "r:cs"] {
+        for id in values(drawing, attr) {
+            assert!(rels.contains(&format!("Id=\"{id}\"")), "{attr}={id} is not a relationship of the drawing");
+        }
+    }
+    // The chart of the same drawing is still there.
+    assert!(after.keys().any(|k| k.starts_with("xl/charts/chart")));
+}

@@ -71,7 +71,7 @@ use crate::{
 const MAX_DEPTH: usize = 8;
 
 /// The folders of the parts kept as they were read (and what those refer to).
-const KEPT_FOLDERS: [&str; 11] = [
+const KEPT_FOLDERS: [&str; 12] = [
     "xl/charts/",
     "xl/pivotTables/",
     "xl/pivotCache/",
@@ -82,6 +82,7 @@ const KEPT_FOLDERS: [&str; 11] = [
     "xl/timelines/",
     "xl/ctrlProps/",
     "xl/activeX/",
+    "xl/diagrams/",
     "customXml/",
 ];
 

@@ -30,6 +30,11 @@ pub struct Alignment {
     shrink_to_fit: BooleanValue,
     text_rotation: UInt32Value,
     indent:        UInt32Value,
+    /// The direction of the text: 0 by the context, 1 left to right, 2 right
+    /// to left (`readingOrder`).
+    reading_order: UInt32Value,
+    /// Justified and distributed text spreads its last line too.
+    justify_last_line: BooleanValue,
 }
 
 impl Alignment {
@@ -134,15 +139,30 @@ impl Alignment {
         self.indent.set_value(value);
     }
 
+    /// The direction of the text: 0 by the context, 1 left to right, 2 right
+    /// to left.
+    #[inline]
+    #[must_use]
+    pub fn reading_order(&self) -> u32 {
+        self.reading_order.value()
+    }
+
+    #[inline]
+    pub fn set_reading_order(&mut self, value: u32) {
+        self.reading_order.set_value(value);
+    }
+
     pub(crate) fn hash_code(&self) -> String {
         crate::helper::utils::md5_hash(format!(
-            "{}{}{}{}{}{}",
+            "{}{}{}{}{}{}{}{}",
             self.horizontal.hash_string(),
             self.vertical.hash_string(),
             self.wrap_text.hash_string(),
             self.shrink_to_fit.hash_string(),
             self.text_rotation.hash_string(),
             self.indent.hash_string(),
+            self.reading_order.hash_string(),
+            self.justify_last_line.hash_string(),
         ))
     }
 
@@ -163,6 +183,8 @@ impl Alignment {
         set_string_from_xml!(self, e, shrink_to_fit, "shrinkToFit");
         set_string_from_xml!(self, e, text_rotation, "textRotation");
         set_string_from_xml!(self, e, indent, "indent");
+        set_string_from_xml!(self, e, reading_order, "readingOrder");
+        set_string_from_xml!(self, e, justify_last_line, "justifyLastLine");
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
@@ -187,6 +209,13 @@ impl Alignment {
         let indent = self.indent.value_string();
         if self.indent.has_value() {
             attributes.push(("indent", indent).into());
+        }
+        if self.justify_last_line.has_value() {
+            attributes.push(("justifyLastLine", self.justify_last_line.value_string()).into());
+        }
+        let reading_order = self.reading_order.value_string();
+        if self.reading_order.has_value() {
+            attributes.push(("readingOrder", reading_order).into());
         }
         write_start_tag(writer, "alignment", attributes, true);
     }

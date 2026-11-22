@@ -53,6 +53,9 @@ pub(crate) struct Stylesheet {
     /// the defaults) as read: their elements refer to the dxfs read, which
     /// keep their places.
     kept_table_styles:    Option<Box<str>>,
+    /// `colors` as read: the palette (`indexedColors`, which the indexed
+    /// colors of the cells are taken from) and the recent colors.
+    kept_colors:          Option<Box<str>>,
     /// The font of the Normal style set by `Workbook::set_default_font`:
     /// written as the first font, whatever the cells made of it.
     default_font:         Option<(Box<str>, f64)>,
@@ -606,7 +609,7 @@ impl Stylesheet {
                         self.differential_formats.set_attributes(reader, e);
                     }
                     b"colors" => {
-                        self.colors.set_attributes(reader, e);
+                        self.kept_colors = keep(crate::reader::driver::read_raw_element(reader, e, false));
                     }
                     _ => (),
                 }
@@ -668,7 +671,11 @@ impl Stylesheet {
         self.differential_formats.write_to(writer);
 
         // colors
-        self.colors.write_to(writer);
+        if let Some(colors) = &self.kept_colors {
+            crate::writer::driver::write_text_node_no_escape(writer, &**colors);
+        } else {
+            self.colors.write_to(writer);
+        }
 
         // tableStyles, extLst (as read)
         if let Some(table_styles) = &self.kept_table_styles {

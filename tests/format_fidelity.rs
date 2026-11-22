@@ -321,3 +321,18 @@ fn panes_frozen_on_columns() {
     let view = &book.sheet(0).unwrap().sheets_views().sheet_view_list()[0];
     assert!(matches!(view.pane().unwrap().active_pane(), PaneValues::TopRight));
 }
+
+#[test]
+fn the_palette_of_the_workbook() {
+    let colors = r#"<colors><indexedColors><rgbColor rgb="00000000"/><rgbColor rgb="00FFFFFF"/><rgbColor rgb="00FF0000"/></indexedColors><mruColors><color rgb="FF3366FF"/></mruColors></colors>"#;
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/styles.xml" {
+            text.replacen("<tableStyles", &format!("{colors}<tableStyles"), 1)
+        } else {
+            text
+        }
+    });
+    assert!(part(&file, "xl/styles.xml").contains(colors));
+    let styles = part(&write(&read(&file)), "xl/styles.xml");
+    assert!(styles.contains(colors), "{styles}");
+}
