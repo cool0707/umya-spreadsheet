@@ -351,3 +351,23 @@ fn how_furigana_are_written() {
     assert!(sheet.contains(r#"type="noConversion""#), "{sheet}");
     assert_eq!(sheet.matches("<phoneticPr").count(), 1, "{sheet}");
 }
+
+#[test]
+fn messages_of_data_validations_with_characters_written_as_references() {
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/worksheets/sheet1.xml" {
+            text.replace(
+                "<pageMargins",
+                r#"<dataValidations count="1"><dataValidation type="whole" allowBlank="1" showInputMessage="1" showErrorMessage="1" error="1&#12316;100 &amp; &lt;OK&gt;" prompt="&#25972;&#25968;" sqref="A1"><formula1>1</formula1><formula2>100</formula2></dataValidation></dataValidations><pageMargins"#,
+            )
+        } else {
+            text
+        }
+    });
+    let book = read(&file);
+    let v = &book.sheet(0).unwrap().data_validations().unwrap().data_validation_list()[0];
+    assert_eq!(v.error_message(), "1〜100 & <OK>");
+    assert_eq!(v.prompt(), "整数");
+    let sheet = part(&write(&book), "xl/worksheets/sheet1.xml");
+    assert!(!sheet.contains("&amp;#"), "{sheet}");
+}

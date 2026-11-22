@@ -380,20 +380,22 @@ impl DataValidation {
             self.show_error_message.set_value_string(v);
         }
 
+        // As written (`&#25968;`, `&amp;`): the writer escapes them again.
+        let unescaped = |v: String| quick_xml::escape::unescape(&v).map_or_else(|_| v.clone(), std::borrow::Cow::into_owned);
         if let Some(v) = get_attribute(e, b"errorTitle") {
-            self.error_title.set_value_string(v);
+            self.error_title.set_value_string(unescaped(v));
         }
 
         if let Some(v) = get_attribute(e, b"error") {
-            self.error_messsage.set_value_string(v);
+            self.error_messsage.set_value_string(unescaped(v));
         }
 
         if let Some(v) = get_attribute(e, b"promptTitle") {
-            self.prompt_title.set_value_string(v);
+            self.prompt_title.set_value_string(unescaped(v));
         }
 
         if let Some(v) = get_attribute(e, b"prompt") {
-            self.prompt.set_value_string(v);
+            self.prompt.set_value_string(unescaped(v));
         }
 
         if let Some(v) = get_attribute(e, b"sqref") {
