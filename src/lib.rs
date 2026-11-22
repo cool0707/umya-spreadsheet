@@ -238,6 +238,7 @@ pub mod helper;
 pub mod reader;
 pub mod structs;
 pub mod traits;
+pub mod vba;
 mod version;
 pub mod writer;
 
