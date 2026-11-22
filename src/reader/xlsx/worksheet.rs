@@ -278,11 +278,12 @@ fn read_from_reader<R: io::BufRead>(
                     .set_attributes(&mut reader, e);
             }
             b"hyperlink" => {
-                let (coor, hyperlink) = get_hyperlink(
+                if let Some((coor, hyperlink)) = get_hyperlink(
                     e,
                     raw_data_of_worksheet.worksheet_relationships()
-                );
-                worksheet.cell_mut(coor).set_hyperlink(hyperlink);
+                ) {
+                    worksheet.cell_mut(coor).set_hyperlink(hyperlink);
+                }
             }
             b"printOptions" => {
                 worksheet
@@ -492,28 +493,44 @@ fn read_row_cells_stream<R, F>(
     );
 }
 
+/// Reads a hyperlink and the cell it belongs to. `ref` can be a range (Excel
+/// writes the area of a merged cell), so the hyperlink is kept on its top-left
+/// cell; a hyperlink without a cell is skipped. A link with an address
+/// (`r:id`) and a `location` (a sheet and cell of another workbook, an anchor)
+/// keeps both.
 fn get_hyperlink(
     e: &quick_xml::events::BytesStart<'_>,
     raw_relationships: Option<&RawRelationships>,
-) -> (String, Hyperlink) {
+) -> Option<(String, Hyperlink)> {
     let mut hyperlink = Hyperlink::default();
 
-    let coordition = get_attribute(e, b"ref").unwrap_or_default();
-    if let Some(v) = get_attribute(e, b"location") {
-        hyperlink.set_url(escape::unescape(&v).unwrap().to_string());
-        hyperlink.set_location(true);
+    let coordinate = get_attribute(e, b"ref").unwrap_or_default();
+    let coordinate = coordinate.split(':').next().unwrap_or_default().trim().to_string();
+    if coordinate.is_empty() {
+        return None;
     }
+    let location = get_attribute(e, b"location")
+        .map(|v| escape::unescape(&v).map(|v| v.to_string()).unwrap_or(v));
     if let Some(v) = get_attribute(e, b"tooltip") {
         hyperlink.set_tooltip(escape::unescape(&v).unwrap().to_string());
     }
-    if let Some(v) = get_attribute(e, b"r:id") {
-        // A dangling r:id (no relationship, or no relationships part at all)
-        // leaves the hyperlink without a URL instead of aborting the read.
-        if let Some(relationship) =
-            raw_relationships.and_then(|rels| rels.find_relationship_by_rid(&v))
-        {
-            hyperlink.set_url(escape::unescape(relationship.target()).unwrap().to_string());
+    // A dangling r:id (no relationship, or no relationships part at all)
+    // leaves the hyperlink without a URL instead of aborting the read.
+    let target = get_attribute(e, b"r:id").and_then(|v| {
+        raw_relationships
+            .and_then(|rels| rels.find_relationship_by_rid(&v))
+            .map(|relationship| escape::unescape(relationship.target()).unwrap().to_string())
+    });
+    match (target, location) {
+        (Some(target), location) => {
+            hyperlink.set_url(target);
+            hyperlink.set_target_location(location.unwrap_or_default());
         }
+        (None, Some(location)) => {
+            hyperlink.set_url(location);
+            hyperlink.set_location(true);
+        }
+        (None, None) => {}
     }
-    (coordition, hyperlink)
+    Some((coordinate, hyperlink))
 }

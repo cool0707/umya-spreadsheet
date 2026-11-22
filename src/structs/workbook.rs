@@ -408,6 +408,64 @@ impl Workbook {
         self.code_name()
     }
 
+    /// The font of the Normal style (the first font of the stylesheet): its
+    /// name and size. Cells without a font of their own show it.
+    #[inline]
+    #[must_use]
+    pub fn default_font(&self) -> Option<(String, f64)> {
+        self.stylesheet.default_font()
+    }
+
+    /// Sets the font of the Normal style. It is written as the first font of
+    /// the stylesheet when the workbook is saved, as a font of its own (not
+    /// the theme's), for every cell that shows the Normal style's font.
+    #[inline]
+    pub fn set_default_font(&mut self, name: &str, size: f64) -> &mut Self {
+        self.stylesheet.set_default_font(name, size);
+        self
+    }
+
+    /// The format of the first cell format (`cellXfs`): what a cell without a
+    /// format of its own shows (its `style()` is empty then), such as the
+    /// alignment of the Normal style.
+    #[inline]
+    #[must_use]
+    pub fn normal_style(&self) -> crate::structs::Style {
+        self.stylesheet.style(0)
+    }
+
+    /// The table styles the workbook defines (`tableStyles` in
+    /// `styles.xml`). Their elements refer to `differential_format`.
+    #[inline]
+    #[must_use]
+    pub fn table_styles(&self) -> Vec<crate::structs::CustomTableStyle> {
+        self.stylesheet.table_styles().2
+    }
+
+    /// The style a new table gets, when the workbook sets one
+    /// (`defaultTableStyle`).
+    #[inline]
+    #[must_use]
+    pub fn default_table_style(&self) -> Option<String> {
+        self.stylesheet.table_styles().0
+    }
+
+    /// The style a new pivot table gets, when the workbook sets one
+    /// (`defaultPivotStyle`).
+    #[inline]
+    #[must_use]
+    pub fn default_pivot_style(&self) -> Option<String> {
+        self.stylesheet.table_styles().1
+    }
+
+    /// The differential format (`dxf`) with this id, as a style: what table
+    /// styles, conditional formats and tables lay over the cells.
+    #[inline]
+    #[must_use]
+    pub fn differential_format(&self, id: u32) -> Option<crate::structs::Style> {
+        self.stylesheet.differential_formats().find_style(id as usize)
+    }
+
     /// (This method is crate only.)
     /// Get Stylesheet.
     #[inline]

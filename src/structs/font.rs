@@ -589,6 +589,42 @@ impl Font {
         self
     }
 
+    /// Takes the theme's font (`scheme`) off: the name is the font then.
+    #[inline]
+    pub(crate) fn remove_scheme(&mut self) -> &mut Self {
+        self.font_scheme = FontScheme::default();
+        self
+    }
+
+    /// Whether the font is bold: None when the format does not say (a
+    /// differential format leaves it to what it is laid over then).
+    #[inline]
+    #[must_use]
+    pub fn bold_value(&self) -> Option<bool> {
+        self.font_bold.val.has_value().then(|| self.font_bold.val())
+    }
+
+    /// Whether the font is italic: None when the format does not say.
+    #[inline]
+    #[must_use]
+    pub fn italic_value(&self) -> Option<bool> {
+        self.font_italic.val.has_value().then(|| self.font_italic.val())
+    }
+
+    /// Whether the font is struck through: None when the format does not say.
+    #[inline]
+    #[must_use]
+    pub fn strikethrough_value(&self) -> Option<bool> {
+        self.font_strike.val.has_value().then(|| self.font_strike.val())
+    }
+
+    /// The underline: None when the format does not say.
+    #[inline]
+    #[must_use]
+    pub fn underline_value(&self) -> Option<&str> {
+        self.font_underline.val.has_value().then(|| self.font_underline.val.value_string())
+    }
+
     #[inline]
     pub(crate) fn default_value() -> Self {
         let mut def = Self::default();

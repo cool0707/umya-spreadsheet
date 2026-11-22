@@ -53,6 +53,9 @@ pub(crate) struct Stylesheet {
     /// the defaults) as read: their elements refer to the dxfs read, which
     /// keep their places.
     kept_table_styles:    Option<Box<str>>,
+    /// The font of the Normal style set by `Workbook::set_default_font`:
+    /// written as the first font, whatever the cells made of it.
+    default_font:         Option<(Box<str>, f64)>,
     /// `extLst` (slicer and timeline styles and their dxfs) as read.
     kept_ext_list:        Option<Box<str>>,
 }
@@ -261,6 +264,28 @@ impl Stylesheet {
     }
 
     #[inline]
+    /// The font of the Normal style: its name and size.
+    pub(crate) fn default_font(&self) -> Option<(String, f64)> {
+        if let Some((name, size)) = &self.default_font {
+            return Some((name.to_string(), *size));
+        }
+        let first = self.fonts.font().first()?;
+        Some((first.name().to_string(), if first.size() > 0.0 { first.size() } else { 11.0 }))
+    }
+
+    pub(crate) fn set_default_font(&mut self, name: &str, size: f64) {
+        self.default_font = Some((name.into(), size));
+    }
+
+    /// The table styles the workbook defines, with the default styles of
+    /// tables and pivot tables.
+    pub(crate) fn table_styles(&self) -> (Option<String>, Option<String>, Vec<super::CustomTableStyle>) {
+        self.kept_table_styles
+            .as_deref()
+            .map(super::custom_table_style::read)
+            .unwrap_or_default()
+    }
+
     pub(crate) fn differential_formats(&self) -> &DifferentialFormats {
         &self.differential_formats
     }
@@ -613,7 +638,16 @@ impl Stylesheet {
         self.numbering_formats.write_to(writer);
 
         // fonts
-        self.fonts.write_to(writer);
+        if let Some((name, size)) = &self.default_font {
+            let mut fonts = self.fonts.clone();
+            if let Some(first) = fonts.font_mut().first_mut() {
+                // Not the theme's font, which would win over the name.
+                first.set_name(&**name).set_size(*size).remove_scheme();
+            }
+            fonts.write_to(writer);
+        } else {
+            self.fonts.write_to(writer);
+        }
 
         // fills
         self.fills.write_to(writer);

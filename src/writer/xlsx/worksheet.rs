@@ -470,6 +470,9 @@ fn write_hyperlinks(writer: &mut InternalWriter, worksheet: &Worksheet) -> i32 {
             } else {
                 attributes.push(("r:id", &r_id_str).into());
                 r_id += 1;
+                if !hyperlink.target_location().is_empty() {
+                    attributes.push(("location", hyperlink.target_location()).into());
+                }
             }
             if !hyperlink.tooltip().is_empty() {
                 attributes.push(("tooltip", hyperlink.tooltip()).into());

@@ -43,7 +43,13 @@ pub(crate) fn read(worksheet: &mut Worksheet, table_file: &RawFile) -> Result<()
                                 let attr_val = get_attribute_value(&attr)?;
                                 table_column.set_totals_row_function_str(&attr_val);
                             }
-                            _ => {}
+                            b"id" => {}
+                            key => {
+                                if !key.contains(&b':') && !key.starts_with(b"xmlns") {
+                                    let attr_val = get_attribute_value(&attr)?;
+                                    table_column.add_other_attribute(&String::from_utf8_lossy(key), &attr_val);
+                                }
+                            }
                         }
                     }
                     // add column to table (if it has a name)
@@ -108,6 +114,18 @@ pub(crate) fn read(worksheet: &mut Worksheet, table_file: &RawFile) -> Result<()
                         crate::helper::utils::unescape_xml_text(&text),
                     );
                 }
+                b"totalsRowFormula" => {
+                    let array = matches!(
+                        crate::reader::driver::get_attribute(e, b"array").as_deref(),
+                        Some("1" | "true")
+                    );
+                    let mut buf = Vec::new();
+                    let text = reader.read_text_into(e.name(), &mut buf).unwrap();
+                    table_column.set_totals_row_formula(
+                        crate::helper::utils::unescape_xml_text(&text),
+                        array,
+                    );
+                }
                 b"table" => {
                     for attr in e.attributes().with_checks(false).flatten() {
                         let attr_val = get_attribute_value(&attr)?;
@@ -130,7 +148,17 @@ pub(crate) fn read(worksheet: &mut Worksheet, table_file: &RawFile) -> Result<()
                             b"totalsRowCount" => {
                                 table.set_totals_row_count_str(&attr_val);
                             }
-                            _ => {}
+                            b"headerRowCount" => {
+                                table.set_header_row_count(attr_val.parse().unwrap_or(1));
+                            }
+                            b"id" => {}
+                            key => {
+                                // Kept as read (the formats of its parts, ...);
+                                // those of other namespaces (xr:uid) are not.
+                                if !key.contains(&b':') && !key.starts_with(b"xmlns") {
+                                    table.add_other_attribute(&String::from_utf8_lossy(key), &attr_val);
+                                }
+                            }
                         }
                     }
                 }
@@ -150,7 +178,13 @@ pub(crate) fn read(worksheet: &mut Worksheet, table_file: &RawFile) -> Result<()
                                 let attr_val = get_attribute_value(&attr)?;
                                 table_column.set_totals_row_function_str(&attr_val);
                             }
-                            _ => {}
+                            b"id" => {}
+                            key => {
+                                if !key.contains(&b':') && !key.starts_with(b"xmlns") {
+                                    let attr_val = get_attribute_value(&attr)?;
+                                    table_column.add_other_attribute(&String::from_utf8_lossy(key), &attr_val);
+                                }
+                            }
                         }
                     }
                 }
