@@ -305,3 +305,19 @@ fn filters_by_what_the_criteria_cannot_say() {
         assert!(sheet.contains(kept), "{kept}: {sheet}");
     }
 }
+
+#[test]
+fn panes_frozen_on_columns() {
+    use umya_spreadsheet::structs::{Pane, PaneStateValues, PaneValues};
+    let mut book = umya_spreadsheet::new_file();
+    let view = &mut book.sheet_mut(0).unwrap().sheet_views_mut().sheet_view_list_mut()[0];
+    let mut pane = Pane::default();
+    pane.set_horizontal_split(1.0).set_active_pane(PaneValues::TopRight).set_state(PaneStateValues::Frozen);
+    view.set_pane(pane);
+    let file = write(&book);
+    let sheet = part(&file, "xl/worksheets/sheet1.xml");
+    assert!(sheet.contains(r#"activePane="topRight""#), "{sheet}");
+    let book = read(&file);
+    let view = &book.sheet(0).unwrap().sheets_views().sheet_view_list()[0];
+    assert!(matches!(view.pane().unwrap().active_pane(), PaneValues::TopRight));
+}
