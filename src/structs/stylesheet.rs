@@ -447,6 +447,8 @@ impl Stylesheet {
 
         // format_id
         style.set_format_id(cell_format.format_id());
+        style.set_quote_prefix(cell_format.quote_prefix());
+        style.set_pivot_button(cell_format.pivot_button());
 
         // alignment
         let mut apply = true;
@@ -513,7 +515,14 @@ impl Stylesheet {
         let font_id = self.fonts.set_style(style);
         let fill_id = self.fills.set_style(style);
         let border_id = self.borders.set_style(style);
-        let format_id = 0;
+        // The cell style (`xfId`), when the stylesheet has it.
+        let format_id = if (style.format_id() as usize) < self.cell_style_formats.cell_format().len() {
+            style.format_id()
+        } else {
+            0
+        };
+        cell_format.set_quote_prefix(style.quote_prefix());
+        cell_format.set_pivot_button(style.pivot_button());
 
         cell_format.set_number_format_id(number_format_id);
         cell_format.set_font_id(font_id);

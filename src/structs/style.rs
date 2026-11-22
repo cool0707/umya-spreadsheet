@@ -84,6 +84,8 @@ pub struct Style {
     numbering_format: Option<Box<NumberingFormat>>,
     format_id:        UInt32Value,
     protection:       Option<Protection>,
+    quote_prefix:     bool,
+    pivot_button:     bool,
 }
 impl Style {
     #[inline]
@@ -390,6 +392,33 @@ impl Style {
     #[inline]
     pub fn set_format_id(&mut self, value: u32) -> &mut Self {
         self.format_id.set_value(value);
+        self
+    }
+
+    /// Whether the text of the cell was typed with an apostrophe before it
+    /// (`quotePrefix`): it stays text even when it looks like a number.
+    #[inline]
+    #[must_use]
+    pub fn quote_prefix(&self) -> bool {
+        self.quote_prefix
+    }
+
+    #[inline]
+    pub fn set_quote_prefix(&mut self, value: bool) -> &mut Self {
+        self.quote_prefix = value;
+        self
+    }
+
+    /// Whether the cell shows the button of a field of a pivot table.
+    #[inline]
+    #[must_use]
+    pub fn pivot_button(&self) -> bool {
+        self.pivot_button
+    }
+
+    #[inline]
+    pub fn set_pivot_button(&mut self, value: bool) -> &mut Self {
+        self.pivot_button = value;
         self
     }
 
