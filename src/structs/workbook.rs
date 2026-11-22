@@ -41,6 +41,9 @@ pub struct Workbook {
     properties:            Properties,
     work_sheet_collection: Vec<Worksheet>,
     macros_code:           Option<Vec<u8>>,
+    /// The digital signatures of the VBA project read (the relationships of
+    /// `xl/vbaProject.bin`): (relationship type, part name, content).
+    vba_signatures:        Vec<(String, String, Vec<u8>)>,
     jsa_macros_code:       Option<Vec<u8>>,
     code_name:             StringValue,
     ribbon_xml_data:       StringValue,
@@ -299,9 +302,12 @@ impl Workbook {
     /// Set Macros Code.
     /// # Arguments
     /// * `value` - Macros Code Raw Data.
+    ///
+    /// The signatures of the project read are taken off: they sign that one.
     #[inline]
     pub fn set_macros_code(&mut self, value: impl Into<Vec<u8>>) -> &mut Self {
         self.macros_code = Some(value.into());
+        self.vba_signatures.clear();
         self
     }
 
@@ -309,7 +315,28 @@ impl Workbook {
     #[inline]
     pub fn remove_macros_code(&mut self) -> &mut Self {
         self.macros_code = None;
+        self.vba_signatures.clear();
         self
+    }
+
+    /// Whether the VBA project is signed (its signatures as read are kept
+    /// while it is not replaced).
+    #[inline]
+    #[must_use]
+    pub fn has_vba_signature(&self) -> bool {
+        !self.vba_signatures.is_empty()
+    }
+
+    /// The signatures of the VBA project: (relationship type, part name,
+    /// content).
+    #[inline]
+    pub(crate) fn vba_signatures(&self) -> &[(String, String, Vec<u8>)] {
+        &self.vba_signatures
+    }
+
+    #[inline]
+    pub(crate) fn set_vba_signatures(&mut self, value: Vec<(String, String, Vec<u8>)>) {
+        self.vba_signatures = value;
     }
 
     /// Has Macros Code

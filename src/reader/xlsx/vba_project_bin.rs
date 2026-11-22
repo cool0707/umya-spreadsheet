@@ -24,8 +24,24 @@ pub(crate) fn read<R: Read + io::Seek>(
     });
     let mut buf = Vec::new();
     r.read_to_end(&mut buf)?;
+    drop(r);
 
     wb.set_macros_code(buf);
+
+    // Its signatures (vbaProjectSignature.bin, ...Agile.bin, ...V3.bin).
+    let mut signatures = Vec::new();
+    if let Some(rels) = crate::structs::read_part(arv, "xl/_rels/vbaProject.bin.rels") {
+        for rel in crate::structs::read_relationships(&rels) {
+            if rel.external || !rel.rel_type.contains("vbaProjectSignature") {
+                continue;
+            }
+            let path = super::driver::join_paths("xl", &rel.target);
+            if let Some(data) = crate::structs::read_part(arv, &path) {
+                signatures.push((rel.rel_type, path, data));
+            }
+        }
+    }
+    wb.set_vba_signatures(signatures);
 
     Ok(())
 }

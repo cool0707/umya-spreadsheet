@@ -891,7 +891,7 @@ fn free_name<W: io::Seek + io::Write>(writer_mng: &mut WriterManager<W>, path: &
     }
 }
 
-fn read_part<R: Read + io::Seek>(
+pub(crate) fn read_part<R: Read + io::Seek>(
     arv: &mut zip::read::ZipArchive<R>,
     path: &str,
 ) -> Option<Vec<u8>> {

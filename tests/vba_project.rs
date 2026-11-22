@@ -193,3 +193,40 @@ fn a_missing_module_stream_is_reported() {
         other => panic!("{other:?}"),
     }
 }
+
+/// The signature of a VBA project (`xl/vbaProjectSignature.bin`, the
+/// relationship of `xl/vbaProject.bin`) is kept while the project is not
+/// replaced: it was dropped, and Excel then took the macros for unsigned.
+#[test]
+fn the_signature_of_the_project_is_kept() {
+    use std::io::{Cursor, Read};
+    let path = "./tests/test_files/vba/rust_xlsxwriter_macro04_signed.xlsm";
+    let original = std::fs::read(path).unwrap();
+    let part = |file: &[u8], name: &str| -> Option<Vec<u8>> {
+        let mut archive = zip::ZipArchive::new(Cursor::new(file)).unwrap();
+        let mut data = Vec::new();
+        archive.by_name(name).ok()?.read_to_end(&mut data).ok()?;
+        Some(data)
+    };
+    let write = |book: &umya_spreadsheet::Workbook| {
+        let mut out = Vec::new();
+        umya_spreadsheet::writer::xlsx::write_writer(book, &mut out).unwrap();
+        out
+    };
+    let mut book = umya_spreadsheet::reader::xlsx::read_reader(Cursor::new(&original), true).unwrap();
+    assert!(book.has_vba_signature());
+    let saved = write(&book);
+    assert_eq!(part(&saved, "xl/vbaProjectSignature.bin"), part(&original, "xl/vbaProjectSignature.bin"));
+    let rels = String::from_utf8(part(&saved, "xl/_rels/vbaProject.bin.rels").unwrap()).unwrap();
+    assert!(rels.contains("relationships/vbaProjectSignature") && rels.contains(r#"Target="vbaProjectSignature.bin""#), "{rels}");
+    let types = String::from_utf8(part(&saved, "[Content_Types].xml").unwrap()).unwrap();
+    assert!(types.contains(r#"<Override PartName="/xl/vbaProjectSignature.bin" ContentType="application/vnd.ms-office.vbaProjectSignature"/>"#), "{types}");
+
+    // A project of its own: the signature does not sign it.
+    let project = book.macros_code().unwrap().to_vec();
+    book.set_macros_code(project);
+    assert!(!book.has_vba_signature());
+    let saved = write(&book);
+    assert!(part(&saved, "xl/vbaProjectSignature.bin").is_none());
+    assert!(part(&saved, "xl/_rels/vbaProject.bin.rels").is_none());
+}
