@@ -17,7 +17,7 @@ aes = "0.9"
 base64 = "0.22.1"
 byteorder = "1.5"
 cbc = "0.2"
-cfb = "0.14"
+cfb = "0.16"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 encoding_rs = "0.8.35"
 fancy-regex = "0.18"
@@ -33,10 +33,17 @@ rand = "0.10"
 rgb = "0.8"
 sha2 = "0.11"
 thousands = "0.2.0"
+# The CLSIDs of compound file storages (vba); the version cfb uses.
+uuid = "1"
+# The clock of vba (`SystemTime::now`), which also works on wasm32 in the browser; cfb uses it as well.
+web-time = "1"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 hex-literal = "1.1"
+# vba: an independent reader of VBA projects to compare with, and property tests of the compression.
+ovba = "0.7"
+proptest = "1"
 rstest = { version = "0.26.1", default-features = false }
 
 
