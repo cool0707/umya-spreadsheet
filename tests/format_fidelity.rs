@@ -371,3 +371,18 @@ fn messages_of_data_validations_with_characters_written_as_references() {
     let sheet = part(&write(&book), "xl/worksheets/sheet1.xml");
     assert!(!sheet.contains("&amp;#"), "{sheet}");
 }
+
+#[test]
+fn what_the_window_of_the_workbook_shows() {
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/workbook.xml" {
+            text.replacen("<workbookView ", r#"<workbookView showSheetTabs="0" showHorizontalScroll="0" "#, 1)
+        } else {
+            text
+        }
+    });
+    let book = read(&file);
+    assert!(!book.workbook_view().show_sheet_tabs());
+    let workbook = part(&write(&book), "xl/workbook.xml");
+    assert!(workbook.contains(r#"showSheetTabs="0""#) && workbook.contains(r#"showHorizontalScroll="0""#), "{workbook}");
+}

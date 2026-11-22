@@ -24,6 +24,10 @@ pub struct WorkbookView {
     window_width: Int32Value,
     window_height: Int32Value,
     tab_ratio: Int32Value,
+    /// What the window shows, as read (`showSheetTabs`, `showHorizontalScroll`,
+    /// `showVerticalScroll`, `visibility`, `minimized`,
+    /// `autoFilterDateGrouping`).
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 impl Default for WorkbookView {
     #[inline]
@@ -43,6 +47,7 @@ impl Default for WorkbookView {
             window_width,
             window_height,
             tab_ratio: Int32Value::default(),
+            other_attributes: Vec::new(),
         }
     }
 }
@@ -173,6 +178,37 @@ impl WorkbookView {
         set_string_from_xml!(self, e, window_width, "windowWidth");
         set_string_from_xml!(self, e, window_height, "windowHeight");
         set_string_from_xml!(self, e, tab_ratio, "tabRatio");
+        for name in [
+            "showSheetTabs",
+            "showHorizontalScroll",
+            "showVerticalScroll",
+            "visibility",
+            "minimized",
+            "autoFilterDateGrouping",
+        ] {
+            if let Some(v) = get_attribute(e, name.as_bytes()) {
+                self.other_attributes.push((name.into(), v.into()));
+            }
+        }
+    }
+
+    /// Whether the window shows the tabs of the sheets (`showSheetTabs`).
+    #[inline]
+    #[must_use]
+    pub fn show_sheet_tabs(&self) -> bool {
+        !self
+            .other_attributes
+            .iter()
+            .any(|(k, v)| &**k == "showSheetTabs" && matches!(&**v, "0" | "false"))
+    }
+
+    #[inline]
+    pub fn set_show_sheet_tabs(&mut self, value: bool) -> &mut Self {
+        self.other_attributes.retain(|(k, _)| &**k != "showSheetTabs");
+        if !value {
+            self.other_attributes.push(("showSheetTabs".into(), "0".into()));
+        }
+        self
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
@@ -207,6 +243,10 @@ impl WorkbookView {
         let tab_ratio = self.tab_ratio.value_string();
         if self.tab_ratio.has_value() {
             attributes.push(("tabRatio", &tab_ratio).into());
+        }
+
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
         }
 
         // workbookView
