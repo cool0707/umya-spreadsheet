@@ -60,7 +60,7 @@ impl CustomTableStyle {
 impl CustomTableStyleElement {
     /// What it formats: `wholeTable`, `headerRow`, `totalRow`, `firstColumn`,
     /// `lastColumn`, `firstRowStripe`, `secondRowStripe`, `firstColumnStripe`,
-    /// `secondColumnStripe`, `firstHeaderCell`, ... (ST_TableStyleType).
+    /// `secondColumnStripe`, `firstHeaderCell`, ... (`ST_TableStyleType`).
     #[inline]
     #[must_use]
     pub fn kind(&self) -> &str {

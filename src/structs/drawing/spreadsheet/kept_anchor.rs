@@ -33,7 +33,7 @@ use crate::structs::{
 /// The `uri` of the `a:graphicData` of a chart, of a chart of the newer
 /// kinds (chartEx: waterfall, treemap, sunburst, histogram, box and whisker,
 /// funnel, map), of the frames of slicers (of a pivot table, of a table)
-/// and timelines, and of SmartArt diagrams, which the model has no part for
+/// and timelines, and of `SmartArt` diagrams, which the model has no part for
 /// either.
 const CHART_URIS: [&[u8]; 6] = [
     b"http://schemas.openxmlformats.org/drawingml/2006/chart",

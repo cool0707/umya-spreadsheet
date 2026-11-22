@@ -123,7 +123,7 @@ impl PartStore {
         let mut pictures = Vec::new();
         let sheet_rels: Vec<String> = arv
             .file_names()
-            .filter(|n| n.starts_with("xl/worksheets/_rels/") && n.ends_with(".rels"))
+            .filter(|n| n.starts_with("xl/worksheets/_rels/") && extension(n).eq_ignore_ascii_case("rels"))
             .map(str::to_string)
             .collect();
         for name in sheet_rels {

@@ -132,7 +132,7 @@ impl NonVisualDrawingProperties {
             .set_value_string(get_attribute(e, b"name").unwrap());
         set_string_from_xml!(self, e, hidden, "hidden");
         // As written (escaped): the writer escapes it again.
-        let unescaped = |v: String| quick_xml::escape::unescape(&v).map(|u| u.into_owned()).unwrap_or(v);
+        let unescaped = |v: String| quick_xml::escape::unescape(&v).map(std::borrow::Cow::into_owned).unwrap_or(v);
         if let Some(v) = get_attribute(e, b"descr") {
             self.descr.set_value(unescaped(v));
         }

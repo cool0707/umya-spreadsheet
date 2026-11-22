@@ -365,15 +365,12 @@ impl SheetView {
 
     #[inline]
     pub fn set_grid_color_index(&mut self, value: Option<u32>) -> &mut Self {
-        match value {
-            Some(index) => {
-                self.default_grid_color.set_value(false);
-                self.color_id.set_value(index);
-            }
-            None => {
-                self.default_grid_color = BooleanValue::default();
-                self.color_id = UInt32Value::default();
-            }
+        if let Some(index) = value {
+            self.default_grid_color.set_value(false);
+            self.color_id.set_value(index);
+        } else {
+            self.default_grid_color = BooleanValue::default();
+            self.color_id = UInt32Value::default();
         }
         self
     }

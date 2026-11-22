@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    fmt::Write as _,
+    io,
+};
 
 use super::XlsxError;
 use crate::{
@@ -31,10 +34,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         let kind = rel_type.rsplit('/').next().unwrap_or_default();
         writer_mng.add_content_type(path, &format!("application/vnd.ms-office.{kind}"));
         let target = path.strip_prefix("xl/").unwrap_or(path);
-        rels.push_str(&format!(
+        let _ = write!(
+            rels,
             "<Relationship Id=\"rId{}\" Type=\"{rel_type}\" Target=\"{target}\"/>",
             n + 1
-        ));
+        );
     }
     rels.push_str("</Relationships>");
     writer_mng.add_bin("xl/_rels/vbaProject.bin.rels", rels.as_bytes())
