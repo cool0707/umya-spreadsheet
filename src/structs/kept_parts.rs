@@ -71,7 +71,7 @@ use crate::{
 const MAX_DEPTH: usize = 8;
 
 /// The folders of the parts kept as they were read (and what those refer to).
-const KEPT_FOLDERS: [&str; 10] = [
+const KEPT_FOLDERS: [&str; 11] = [
     "xl/charts/",
     "xl/pivotTables/",
     "xl/pivotCache/",
@@ -81,6 +81,7 @@ const KEPT_FOLDERS: [&str; 10] = [
     "xl/timelineCaches/",
     "xl/timelines/",
     "xl/ctrlProps/",
+    "xl/activeX/",
     "customXml/",
 ];
 
@@ -115,10 +116,30 @@ impl PartStore {
         if charts.is_empty() {
             return store;
         }
+        // The pictures of the ActiveX controls of the sheets (what Excel shows
+        // in their place: the `r:id` of their `controlPr`), from the sheets'
+        // relationships.
+        let mut pictures = Vec::new();
+        let sheet_rels: Vec<String> = arv
+            .file_names()
+            .filter(|n| n.starts_with("xl/worksheets/_rels/") && n.ends_with(".rels"))
+            .map(str::to_string)
+            .collect();
+        for name in sheet_rels {
+            let Some(rels) = read_part(arv, &name) else { continue };
+            let rels = read_relationships(&rels);
+            if !rels.iter().any(|r| r.rel_type.ends_with("/control")) {
+                continue;
+            }
+            for rel in rels.iter().filter(|r| !r.external && r.rel_type.ends_with("/image")) {
+                pictures.push((join_paths("xl/worksheets", &rel.target), 0));
+            }
+        }
         if let Some(data) = read_part(arv, CONTENT_TYPES) {
             store.read_content_types(&data);
         }
         let mut pending: Vec<(String, usize)> = charts.into_iter().map(|c| (c, 0)).collect();
+        pending.extend(pictures);
         while let Some((path, depth)) = pending.pop() {
             if store.files.contains_key(&path) {
                 continue;
@@ -391,7 +412,7 @@ impl KeptRelationships {
         matches!(
             rel_type.rsplit('/').next(),
             Some(
-                "externalLink" | "slicerCache" | "timelineCache" | "customXml" | "slicer" | "timeline" | "ctrlProp"
+                "externalLink" | "slicerCache" | "timelineCache" | "customXml" | "slicer" | "timeline" | "ctrlProp" | "control"
                     | "pivotTable" | "pivotCacheDefinition"
             )
         )
@@ -409,6 +430,12 @@ impl KeptRelationships {
     /// default one (the kept elements are in the same).
     pub(crate) fn set_namespaces(&mut self, e: &quick_xml::events::BytesStart<'_>) {
         self.namespaces = root_namespaces(e);
+    }
+
+    /// Whether an element kept refers to the relationship `id` (`r:id`).
+    pub(crate) fn refers_to(&self, id: &str) -> bool {
+        let attr = format!("r:id=\"{id}\"");
+        self.xml.iter().any(|(_, xml)| xml.contains(&attr))
     }
 
     pub(crate) fn add_xml(&mut self, name: &str, xml: String) {

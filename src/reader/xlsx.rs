@@ -274,7 +274,12 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
                 TABLE_NS => {
                     table::read(worksheet, relationship.raw_file()).unwrap();
                 }
-                rel_type if crate::structs::KeptRelationships::is_kept_type(rel_type) => {
+                rel_type
+                    if crate::structs::KeptRelationships::is_kept_type(rel_type)
+                        // The picture of an ActiveX control (its controlPr).
+                        || (rel_type.ends_with("/image")
+                            && worksheet.kept_relationships().refers_to(relationship.id())) =>
+                {
                     let sheet_path = raw_data_of_worksheet.worksheet_file().file_target();
                     let dir = sheet_path.rsplit_once('/').map_or("", |(d, _)| d);
                     let path = driver::join_paths(dir, relationship.target());
