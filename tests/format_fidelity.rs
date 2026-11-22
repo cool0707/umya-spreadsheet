@@ -279,3 +279,29 @@ fn the_format_of_the_normal_style() {
     let normal = book.normal_style();
     assert_eq!(normal.alignment().unwrap().vertical().value_string(), "center");
 }
+
+#[test]
+fn filters_by_what_the_criteria_cannot_say() {
+    let file = edit(&write(&umya_spreadsheet::new_file()), |name, text| {
+        if name == "xl/worksheets/sheet1.xml" {
+            text.replace(
+                "<pageMargins",
+                r#"<autoFilter ref="A1:C9"><filterColumn colId="0"><filters><dateGroupItem year="2024" month="3" dateTimeGrouping="month"/></filters></filterColumn><filterColumn colId="1"><colorFilter dxfId="0"/></filterColumn><filterColumn colId="2"><filters><filter val="a"/></filters></filterColumn></autoFilter><pageMargins"#,
+            )
+        } else {
+            text
+        }
+    });
+    let book = read(&file);
+    let columns = book.sheet(0).unwrap().auto_filter().unwrap().filter_columns();
+    assert!(columns.iter().all(|c| c.is_filtered()));
+    assert!(columns[0].criteria().is_none() || columns[0].is_filtered());
+    let sheet = part(&write(&book), "xl/worksheets/sheet1.xml");
+    for kept in [
+        r#"<dateGroupItem year="2024" month="3" dateTimeGrouping="month"/>"#,
+        r#"<colorFilter dxfId="0"/>"#,
+        r#"<filter val="a"/>"#,
+    ] {
+        assert!(sheet.contains(kept), "{kept}: {sheet}");
+    }
+}

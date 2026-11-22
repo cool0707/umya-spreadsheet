@@ -79,6 +79,11 @@ pub struct FilterColumn {
     column_id: UInt32Value,
     hidden_button: BooleanValue,
     criteria: Option<FilterCriteria>,
+    /// What is in the `filterColumn` as read, when it filters by something
+    /// `criteria` cannot say (dates grouped by year, month, day: `dateGroupItem`;
+    /// a colour, an icon, a dynamic filter such as "this month"): written back
+    /// as it was until the criteria are set.
+    kept: Option<Box<str>>,
 }
 
 impl FilterColumn {
@@ -124,7 +129,16 @@ impl FilterColumn {
     #[inline]
     pub fn set_criteria(&mut self, value: Option<FilterCriteria>) -> &mut Self {
         self.criteria = value;
+        self.kept = None;
         self
+    }
+
+    /// Whether the column filters the rows: by `criteria`, or by something
+    /// else the file has (dates grouped, a colour, an icon, a dynamic filter).
+    #[inline]
+    #[must_use]
+    pub fn is_filtered(&self) -> bool {
+        self.criteria.is_some() || self.kept.is_some()
     }
 
     /// Shows the rows whose cell shows one of `values` (and the empty
@@ -156,6 +170,14 @@ impl FilterColumn {
         if empty_flg {
             return;
         }
+        let raw = crate::reader::driver::read_raw_element(reader, e, false);
+        let mut reader = Reader::from_str(&raw);
+        // Past the start tag of filterColumn itself.
+        if reader.read_event().is_err() {
+            return;
+        }
+        let mut known = true;
+        let reader = &mut reader;
         xml_read_loop!(
             reader,
             Event::Empty(ref e) | Event::Start(ref e) => {
@@ -185,16 +207,27 @@ impl FilterColumn {
                             val: get_attribute(e, b"val").and_then(|v| v.parse().ok()).unwrap_or(10.0),
                         });
                     }
-                    _ => (),
+                    _ => known = false,
                 }
             },
             Event::End(ref e) => {
                 if e.name().into_inner() == b"filterColumn" {
-                    return
+                    break
                 }
             },
-            Event::Eof => panic!("Error: Could not find {} end element", "filterColumn")
+            Event::Eof => break
         );
+        // Kept only when what it holds needs no namespace of its own (an
+        // extension's prefix would be written without its declaration).
+        if !known {
+            let start = raw.find('>').map_or(0, |i| i + 1);
+            let end = raw.rfind("</").unwrap_or(raw.len()).max(start);
+            let inner = &raw[start..end];
+            let prefixed = inner.split('<').skip(1).any(|t| t.split([' ', '>', '/']).next().is_some_and(|n| n.contains(':')));
+            if !prefixed {
+                self.kept = Some(inner.into());
+            }
+        }
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
@@ -207,6 +240,14 @@ impl FilterColumn {
         }
 
         // filterColumn
+        if let Some(kept) = &self.kept {
+            write_start_tag(writer, "filterColumn", attributes, false);
+            writer
+                .write_event(Event::Text(quick_xml::events::BytesText::from_escaped(&**kept)))
+                .unwrap();
+            write_end_tag(writer, "filterColumn");
+            return;
+        }
         write_start_tag(writer, "filterColumn", attributes, self.criteria.is_none());
         let Some(criteria) = &self.criteria else { return };
         match criteria {
