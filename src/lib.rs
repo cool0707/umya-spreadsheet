@@ -234,12 +234,14 @@ extern crate html5gum;
 extern crate rand;
 extern crate sha2;
 
+pub mod drawingml;
 pub mod helper;
 pub mod reader;
 pub mod structs;
 pub mod traits;
 mod version;
 pub mod writer;
+pub mod xml_tree;
 
 #[allow(unused_imports)]
 pub use version::*;
