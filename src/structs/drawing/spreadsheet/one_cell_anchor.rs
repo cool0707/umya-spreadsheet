@@ -11,6 +11,7 @@ use quick_xml::{
 };
 
 use super::{
+    ClientData,
     Extent,
     GroupShape,
     MarkerType,
@@ -34,6 +35,7 @@ pub struct OneCellAnchor {
     group_shape: Option<Box<GroupShape>>,
     shape:       Option<Box<Shape>>,
     picture:     Option<Box<Picture>>,
+    client_data: ClientData,
 }
 
 impl OneCellAnchor {
@@ -192,6 +194,18 @@ impl OneCellAnchor {
         self.picture.is_some() || self.group_shape.is_some()
     }
 
+    /// Whether the object is printed and locked with the sheet.
+    #[inline]
+    #[must_use]
+    pub fn client_data(&self) -> &ClientData {
+        &self.client_data
+    }
+
+    #[inline]
+    pub fn client_data_mut(&mut self) -> &mut ClientData {
+        &mut self.client_data
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
@@ -224,6 +238,9 @@ impl OneCellAnchor {
                 }
             },
             Event::Empty(ref e) => {
+                if matches!(e.name().into_inner(), b"xdr:clientData" | b"clientData") {
+                    self.client_data.set_attributes(e);
+                }
                 if matches!(e.name().into_inner(), b"xdr:ext" | b"ext") {
                     self.extent.set_attributes(reader, e);
                 }
@@ -267,7 +284,7 @@ impl OneCellAnchor {
         }
 
         // xdr:clientData
-        write_start_tag(writer, "xdr:clientData", vec![], true);
+        write_start_tag(writer, "xdr:clientData", self.client_data.attributes(), true);
 
         write_end_tag(writer, "xdr:oneCellAnchor");
     }

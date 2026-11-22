@@ -197,3 +197,26 @@ fn strings_escaped_by_excel_are_read_back() {
     let book = read(out.get_ref());
     assert_eq!(book.sheet(0).unwrap().value("A1"), "a\u{1}b _x000D_\nc\r");
 }
+
+/// What the model of a drawing did not read was lost when the workbook was
+/// saved: the start of a line (an oval), a reflection, "do not print" on an
+/// object, the alternative text of a picture, the underline and the
+/// superscript of a run.
+#[test]
+fn drawings_keep_what_their_objects_look_like() {
+    let shapes = parts(&write(&read(&file("drawing_shapes.xlsx"))));
+    let drawing = &shapes["xl/drawings/drawing1.xml"];
+    for kept in [
+        r#"<a:headEnd type="oval"/>"#,
+        r#"<a:reflection blurRad="6350" stA="53000" endA="300" endPos="35500" dist="12700" dir="5400000" sy="-90000" algn="bl" rotWithShape="0"/>"#,
+        r#"<xdr:clientData fPrintsWithSheet="0"/>"#,
+    ] {
+        assert!(drawing.contains(kept), "{kept}");
+    }
+    let picture = parts(&write(&read(&file("drawing_picture.xlsx"))));
+    assert!(picture["xl/drawings/drawing1.xml"].contains(r#"descr="Picture""#));
+
+    let mut book = read(&file("drawing_shapes.xlsx"));
+    let anchors = book.sheet_mut(0).unwrap().worksheet_drawing_mut().two_cell_anchor_collection_mut();
+    assert!(anchors.iter().any(|a| !a.client_data().prints_with_sheet()));
+}

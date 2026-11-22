@@ -11,6 +11,7 @@ use quick_xml::{
 };
 
 use super::{
+    ClientData,
     super::super::EnumValue,
     ConnectionShape,
     EditAsValues,
@@ -55,6 +56,7 @@ pub struct TwoCellAnchor {
     connection_shape:     Option<Box<ConnectionShape>>,
     picture:              Option<Box<Picture>>,
     is_alternate_content: BooleanValue,
+    client_data:          ClientData,
 }
 
 impl TwoCellAnchor {
@@ -330,6 +332,18 @@ impl TwoCellAnchor {
         self.picture.is_some() || self.group_shape.is_some()
     }
 
+    /// Whether the object is printed and locked with the sheet.
+    #[inline]
+    #[must_use]
+    pub fn client_data(&self) -> &ClientData {
+        &self.client_data
+    }
+
+    #[inline]
+    pub fn client_data_mut(&mut self) -> &mut ClientData {
+        &mut self.client_data
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
@@ -340,8 +354,16 @@ impl TwoCellAnchor {
 
         xml_read_loop!(
             reader,
+            Event::Empty(ref e) => {
+                if matches!(e.name().into_inner(), b"xdr:clientData" | b"clientData") {
+                    self.client_data.set_attributes(e);
+                }
+            },
             Event::Start(ref e) => {
                 match e.name().into_inner() {
+                b"xdr:clientData" | b"clientData" => {
+                    self.client_data.set_attributes(e);
+                }
                 b"xdr:from" | b"from" => {
                     self.from_marker.set_attributes(reader, e);
                 }
@@ -451,7 +473,7 @@ impl TwoCellAnchor {
         }
 
         // xdr:clientData
-        write_start_tag(writer, "xdr:clientData", vec![], true);
+        write_start_tag(writer, "xdr:clientData", self.client_data.attributes(), true);
 
         write_end_tag(writer, "xdr:twoCellAnchor");
 

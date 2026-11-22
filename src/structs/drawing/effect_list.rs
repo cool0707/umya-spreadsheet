@@ -28,6 +28,9 @@ pub struct EffectList {
     glow:         Option<Box<Glow>>,
     outer_shadow: Option<Box<OuterShadow>>,
     soft_edge:    Option<Box<SoftEdge>>,
+    /// The effects not modelled above (`a:reflection`, `a:innerShdw`,
+    /// `a:blur`, `a:prstShdw`, `a:fillOverlay`), as read: (local name, XML).
+    kept:         Vec<(Box<str>, Box<str>)>,
 }
 
 impl EffectList {
@@ -131,14 +134,25 @@ impl EffectList {
         xml_read_loop!(
             reader,
             Event::Empty(ref e) => {
-                if e.name().into_inner() == b"a:softEdge" {
-                    let mut obj = SoftEdge::default();
-                    obj.set_attributes(reader, e);
-                    self.set_soft_edge(obj);
+                match e.name().into_inner() {
+                    b"a:softEdge" => {
+                        let mut obj = SoftEdge::default();
+                        obj.set_attributes(reader, e);
+                        self.set_soft_edge(obj);
+                    }
+                    name @ (b"a:reflection" | b"a:innerShdw" | b"a:blur" | b"a:prstShdw" | b"a:fillOverlay") => {
+                        let name: Box<str> = String::from_utf8_lossy(&name[2..]).into();
+                        self.kept.push((name, crate::reader::driver::read_raw_element(reader, e, true).into()));
+                    }
+                    _ => (),
                 }
             },
             Event::Start(ref e) => {
                 match e.name().into_inner() {
+                    name @ (b"a:reflection" | b"a:innerShdw" | b"a:blur" | b"a:prstShdw" | b"a:fillOverlay") => {
+                        let name: Box<str> = String::from_utf8_lossy(&name[2..]).into();
+                        self.kept.push((name, crate::reader::driver::read_raw_element(reader, e, false).into()));
+                    }
                     b"a:glow" => {
                         let mut obj = Glow::default();
                         obj.set_attributes(reader, e);
@@ -162,22 +176,41 @@ impl EffectList {
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        let empty_flag =
-            self.glow.is_none() && self.outer_shadow.is_none() && self.soft_edge.is_none();
+        let empty_flag = self.glow.is_none()
+            && self.outer_shadow.is_none()
+            && self.soft_edge.is_none()
+            && self.kept.is_empty();
+        // The effects kept as read, where they go among the others (in the
+        // order of the schema).
+        let kept = |writer: &mut Writer<Cursor<Vec<u8>>>, names: &[&str]| {
+            for (name, xml) in &self.kept {
+                if names.contains(&&**name) {
+                    writer
+                        .write_event(Event::Text(quick_xml::events::BytesText::from_escaped(&**xml)))
+                        .unwrap();
+                }
+            }
+        };
 
         // a:effectLst
         write_start_tag(writer, "a:effectLst", vec![], empty_flag);
 
         if !empty_flag {
+            kept(writer, &["blur", "fillOverlay"]);
+
             // a:glow
             if let Some(v) = &self.glow {
                 v.write_to(writer);
             }
 
+            kept(writer, &["innerShdw"]);
+
             // a:outerShdow
             if let Some(v) = &self.outer_shadow {
                 v.write_to(writer);
             }
+
+            kept(writer, &["prstShdw", "reflection"]);
 
             // a:softEdge
             if let Some(v) = &self.soft_edge {

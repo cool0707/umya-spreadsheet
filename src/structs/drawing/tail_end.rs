@@ -111,7 +111,12 @@ impl TailEnd {
     }
 
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
-        // a:tailEnd
+        self.write_tag(writer, "a:tailEnd");
+    }
+
+    /// Writes it as `tag`: `a:tailEnd`, or `a:headEnd` (the same attributes,
+    /// at the start of the line).
+    pub(crate) fn write_tag(&self, writer: &mut Writer<Cursor<Vec<u8>>>, tag: &str) {
         let mut attributes: crate::structs::AttrCollection = Vec::new();
         if self.t_type.has_value() {
             attributes.push(("type", (self.t_type.value_str())).into());
@@ -122,6 +127,6 @@ impl TailEnd {
         if self.length.has_value() {
             attributes.push(("len", (self.length.value_str())).into());
         }
-        write_start_tag(writer, "a:tailEnd", attributes, true);
+        write_start_tag(writer, tag, attributes, true);
     }
 }

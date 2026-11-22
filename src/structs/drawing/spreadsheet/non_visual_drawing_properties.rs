@@ -32,6 +32,9 @@ pub struct NonVisualDrawingProperties {
     id:     UInt32Value,
     name:   StringValue,
     hidden: BooleanValue,
+    /// The alternative text (`descr`) and its title.
+    descr:  StringValue,
+    title:  StringValue,
 }
 
 impl NonVisualDrawingProperties {
@@ -92,6 +95,32 @@ impl NonVisualDrawingProperties {
         self
     }
 
+    /// The alternative text of the object (what a screen reader says).
+    #[inline]
+    #[must_use]
+    pub fn description(&self) -> &str {
+        self.descr.value_str()
+    }
+
+    #[inline]
+    pub fn set_description<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.descr.set_value(value);
+        self
+    }
+
+    /// The title of the alternative text.
+    #[inline]
+    #[must_use]
+    pub fn title(&self) -> &str {
+        self.title.value_str()
+    }
+
+    #[inline]
+    pub fn set_title<S: Into<String>>(&mut self, value: S) -> &mut Self {
+        self.title.set_value(value);
+        self
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
@@ -102,6 +131,14 @@ impl NonVisualDrawingProperties {
         self.name
             .set_value_string(get_attribute(e, b"name").unwrap());
         set_string_from_xml!(self, e, hidden, "hidden");
+        // As written (escaped): the writer escapes it again.
+        let unescaped = |v: String| quick_xml::escape::unescape(&v).map(|u| u.into_owned()).unwrap_or(v);
+        if let Some(v) = get_attribute(e, b"descr") {
+            self.descr.set_value(unescaped(v));
+        }
+        if let Some(v) = get_attribute(e, b"title") {
+            self.title.set_value(unescaped(v));
+        }
 
         if empty_flg {
             return;
@@ -127,6 +164,12 @@ impl NonVisualDrawingProperties {
         attributes.push(("name", self.name.value_str()).into());
         if self.hidden.has_value() {
             attributes.push(("hidden", self.hidden.value_string()).into());
+        }
+        if self.descr.has_value() {
+            attributes.push(("descr", self.descr.value_str()).into());
+        }
+        if self.title.has_value() {
+            attributes.push(("title", self.title.value_str()).into());
         }
         write_start_tag(writer, "xdr:cNvPr", attributes, !with_inner);
 
