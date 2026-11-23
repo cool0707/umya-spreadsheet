@@ -63,6 +63,20 @@ pub trait Package {
     /// there is no such part or it cannot be read.
     fn xml(&self, part: &str) -> Option<Node>;
 
+    /// The part named `part` as it is (a picture, the persisted data of an
+    /// ActiveX control); None when there is no such part or the program does
+    /// not keep it.
+    fn bytes(&self, _part: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// The child `name` of the root of the part `part` (the `controls` of a
+    /// sheet). A program that does not keep whole sheets (they are large)
+    /// keeps the elements it needs and gives them here.
+    fn sheet_element(&self, part: &str, name: &str) -> Option<Node> {
+        self.xml(part)?.child(name).cloned()
+    }
+
     /// The relationships of a part: id -> (type, part it points to).
     fn rels(&self, part: &str) -> HashMap<String, (String, String)> {
         let (dir, file) = part.rsplit_once('/').unwrap_or(("", part));

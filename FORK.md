@@ -23,16 +23,19 @@
 
 | モジュール | 中身 | 使うところ |
 |---|---|---|
-| `xml_tree` | XML の木（`Node`。深さ 256 より下は捨てる）。読み方は 3 つ: `parse`（整形式だけ）、`parse_partial`（読めたところまで）、`parse_lenient`（終了タグを照合しない。VML 用） | xljs `src/xml.rs`（再エクスポート）、RAS `view/xml.rs` |
+| `xml_tree` | XML の木（`Node`。深さ 256 より下は捨てる）。読み方は 3 つ: `parse`（整形式だけ）、`parse_partial`（読めたところまで）、`parse_lenient`（終了タグを照合しない。終了タグのない `<br>` は改行として読む。VML 用） | xljs `src/xml.rs`（再エクスポート）、RAS `view/xml.rs` |
 | `drawingml::geometry` | 図形の形。ECMA-376 の既定の図形とワードアートの文字の変形の定義（`src/drawingml/presets.zip`）、ガイドの式、フリーフォームのパスを評価して SVG のパスにする | xljs の印刷、RAS の `ras book view` |
 | `drawingml::color` | テーマの色、色の変換（`lumMod` など）、塗り、スタイルの参照 | 同上 |
 | `drawingml::anchor` | アンカーとセルの位置、`xfrm` | 同上 |
 | `drawingml::chart` | グラフの自動の色（`colorsN.xml`）、系列の参照、キャッシュの値 | 同上 |
-| `drawingml::package` | 部品のパスの解決、リレーション、`Package` トレイト（`sheet_part`・テーマの色） | 同上 |
+| `drawingml::package` | 部品のパスの解決、リレーション、`Package` トレイト（`sheet_part`・テーマの色。部品のバイト列 `bytes`、シートの一部の要素 `sheet_element` はプログラムが持ち方に合わせて実装する） | 同上 |
+| `drawingml::controls` | シートのフォームコントロールと ActiveX コントロール（と埋め込みオブジェクト）を読む: 種類・名前・位置・文字とフォント・リンクするセル・リストの範囲・チェックの状態・値・マクロ。シートの `controls`、`ctrlProps`、VML、描画の中の写し（`Control::apply_mirror`）を突き合わせ、ActiveX は保存された中身（MS-OFORMS）から読む。読むだけ（書くのは読んだまま持つ部品） | RAS のブックの表示（`view/controls.rs` が描く） |
 | `vba` | `vbaProject.bin` の読み書き: CFB、MS-OVBA の圧縮と展開、`dir` ストリーム、モジュールのソースとコードページ、p-code なしの書き出し、プロジェクトの保護、VBA のストンピングの検出、ユーザーフォームのデザイナ ストレージ。`.xls` の `_VBA_PROJECT_CUR` も読める（`VbaProject::read_storage`） | xljs `src/vba`、RAS `crates/ras-ovba` |
 
 - 図形の定義の作り直し方は `tools/preset-shapes/make.py`。
-- 図形を HTML や SVG に描くところは、xljs と RAS でそれぞれに持つ。描く先が違う（xljs は印刷、RAS は画面）。
+- 図形やコントロールを HTML や SVG に描くところは、xljs と RAS でそれぞれに持つ。描く先が違う（xljs は印刷、RAS は画面）。
+- フォームコントロールと ActiveX コントロールはモデルに入れない。保存は読んだまま持つ部品で足り（4 つの部品の整合と ActiveX の中身を書くのは割に合わない）、
+  読むのは `drawingml::controls`。値などを書き換える要求が出たら、読んだまま持つ部品のその属性を書き換える API を足す。新しく作る要求が出るまでモデルにしない。
 - RAS の `crates/ras-ovba` には、バイトを保つ OPC パッケージの操作が残る。`pack` / `unpack`、シートの操作、`.xlsb` の読み取りなど。これらは変更のないパートを元のバイトのまま残すために、わざとこのクレートのモデルを通さない。
 
 ### 2.2 モデルから読めるもの
