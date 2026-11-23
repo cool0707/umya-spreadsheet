@@ -33,6 +33,10 @@ pub struct DefinedName {
     string_value:   StringValue,
     local_sheet_id: UInt32Value,
     hidden:         BooleanValue,
+    /// The attributes read that the model has nothing for (`function`,
+    /// `vbProcedure`, `comment`...: a macro registered as a name), written
+    /// back as read.
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 impl DefinedName {
     #[inline]
@@ -237,6 +241,14 @@ impl DefinedName {
         set_string_from_xml!(self, e, name, "name");
         set_string_from_xml!(self, e, local_sheet_id, "localSheetId");
         set_string_from_xml!(self, e, hidden, "hidden");
+        for a in e.attributes().with_checks(false).flatten() {
+            let key = a.key.into_inner();
+            if matches!(key, b"name" | b"localSheetId" | b"hidden") || key.contains(&b':') {
+                continue;
+            }
+            let value = crate::reader::driver::unescaped_attribute_value(&a);
+            self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into()));
+        }
 
         let mut buf = Vec::new();
         let text = reader
@@ -255,6 +267,9 @@ impl DefinedName {
         let hidden_str = self.hidden.value_string();
         if self.hidden.has_value() {
             attributes.push(("hidden", hidden_str).into());
+        }
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
         }
         write_start_tag(writer, "definedName", attributes, false);
         write_text_node_conversion(writer, self.address());

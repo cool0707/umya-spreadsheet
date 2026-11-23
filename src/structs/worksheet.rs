@@ -85,6 +85,9 @@ use crate::{
 pub struct Worksheet {
     raw_data_of_worksheet:             Option<RawWorksheet>,
     kept_relationships:                crate::structs::KeptRelationships,
+    /// The attributes of `sheetPr` read that the model has nothing for
+    /// (`filterMode`, `enableFormatConditionsCalculation`...).
+    sheet_pr_attributes:               Vec<(Box<str>, Box<str>)>,
     r_id:                              Box<str>,
     sheet_id:                          Box<str>,
     title:                             Box<str>,
@@ -1664,6 +1667,15 @@ impl Worksheet {
     #[inline]
     pub(crate) fn set_sheet_id<S: Into<String>>(&mut self, value: S) {
         self.sheet_id = value.into().into_boxed_str();
+    }
+
+    pub(crate) fn sheet_pr_attributes(&self) -> &[(Box<str>, Box<str>)] {
+        &self.sheet_pr_attributes
+    }
+
+    pub(crate) fn add_sheet_pr_attribute(&mut self, name: &str, value: &str) {
+        self.sheet_pr_attributes.retain(|(k, _)| &**k != name);
+        self.sheet_pr_attributes.push((name.into(), value.into()));
     }
 
     /// Has Code Name.

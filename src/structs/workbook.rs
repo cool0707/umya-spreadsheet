@@ -62,6 +62,14 @@ pub struct Workbook {
     chart_parts:           PartStore,
     kept_relationships:    crate::structs::KeptRelationships,
     persons:               Vec<crate::structs::office2019::person::Person>,
+    /// The attributes of `workbookPr` read that the model has nothing for
+    /// (`showObjects`, `backupFile`, `defaultThemeVersion`...), written back
+    /// as read.
+    workbook_pr_attributes: Vec<(Box<str>, Box<str>)>,
+    /// The parts the package refers to (`_rels/.rels`) that the model has
+    /// nothing for, kept as read: the sensitivity label, the customized
+    /// ribbon, add-ins of the task pane...
+    package_relationships: crate::structs::KeptRelationships,
 }
 
 impl Workbook {
@@ -1268,6 +1276,35 @@ impl Workbook {
     #[must_use]
     pub fn date1904(&self) -> bool {
         self.date1904
+    }
+
+    /// An attribute of `workbookPr` read that the model has no setting for
+    /// (`showObjects`, `backupFile`...), as read.
+    #[must_use]
+    pub fn workbook_pr_attribute(&self, name: &str) -> Option<&str> {
+        self.workbook_pr_attributes.iter().find(|(k, _)| &**k == name).map(|(_, v)| &**v)
+    }
+
+    /// Sets (`Some`) or removes (`None`) an attribute of `workbookPr` the
+    /// model has no setting for (`showObjects="placeholders"`...).
+    pub fn set_workbook_pr_attribute(&mut self, name: &str, value: Option<&str>) -> &mut Self {
+        self.workbook_pr_attributes.retain(|(k, _)| &**k != name);
+        if let Some(value) = value {
+            self.workbook_pr_attributes.push((name.into(), value.into()));
+        }
+        self
+    }
+
+    pub(crate) fn package_relationships(&self) -> &crate::structs::KeptRelationships {
+        &self.package_relationships
+    }
+
+    pub(crate) fn package_relationships_mut(&mut self) -> &mut crate::structs::KeptRelationships {
+        &mut self.package_relationships
+    }
+
+    pub(crate) fn workbook_pr_attributes(&self) -> &[(Box<str>, Box<str>)] {
+        &self.workbook_pr_attributes
     }
 
     /// Set whether the workbook uses the 1904 date system.

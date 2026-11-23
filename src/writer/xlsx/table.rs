@@ -160,6 +160,14 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         write_end_tag(&mut writer, "table");
 
         writer_mng.add_file_at_table(writer, table_no)?;
+        // The parts kept as read (the query table).
+        let kept = table.kept_relationships().write_parts(writer_mng)?;
+        if !kept.is_empty() {
+            let list: Vec<(&str, &str, &str, bool)> =
+                kept.iter().map(|(id, t, target)| (id.as_str(), t.as_str(), target.as_str(), false)).collect();
+            let path = crate::structs::relationships_path(&format!("xl/tables/table{table_no}.xml"));
+            crate::structs::write_relationships_part(writer_mng, &path, &list)?;
+        }
         table_no_list.push(table_no.to_string());
     }
     Ok(table_no_list)

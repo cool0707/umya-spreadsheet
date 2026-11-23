@@ -126,6 +126,14 @@ fn read_reader_with_source<R: io::Read + io::Seek>(
             book.kept_relationships_mut().add(&store, id, rel_type, &path);
         }
     }
+    if let Some(rels) = crate::structs::read_part(&mut arv, "_rels/.rels") {
+        for rel in crate::structs::read_relationships(&rels) {
+            if !rel.external && crate::structs::is_package_kept_type(&rel.rel_type) {
+                let path = crate::structs::join_part("", &rel.target);
+                book.package_relationships_mut().add(&store, &rel.id, &rel.rel_type, &path);
+            }
+        }
+    }
     book.set_chart_parts(store);
 
     shared_strings::read(&mut arv, &mut book)?;
@@ -273,11 +281,22 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
                 // table
                 TABLE_NS => {
                     table::read(worksheet, relationship.raw_file()).unwrap();
+                    // The query table of a table of external data.
+                    let sheet_path = raw_data_of_worksheet.worksheet_file().file_target();
+                    let dir = sheet_path.rsplit_once('/').map_or("", |(d, _)| d);
+                    let path = driver::join_paths(dir, relationship.target());
+                    let kept = chart_parts.kept_relationships_of(&path);
+                    if let Some(table) = worksheet.tables_mut().last_mut() {
+                        for (id, rel_type, target) in kept {
+                            table.kept_relationships_mut().add(chart_parts, &id, &rel_type, &target);
+                        }
+                    }
                 }
                 rel_type
                     if crate::structs::KeptRelationships::is_kept_type(rel_type)
-                        // The picture of an ActiveX control (its controlPr).
-                        || (rel_type.ends_with("/image")
+                        // The picture of an ActiveX control (its controlPr),
+                        // what the elements kept as read refer to.
+                        || (crate::structs::is_sheet_kept_target(rel_type)
                             && worksheet.kept_relationships().refers_to(relationship.id())) =>
                 {
                     let sheet_path = raw_data_of_worksheet.worksheet_file().file_target();

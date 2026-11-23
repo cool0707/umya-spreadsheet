@@ -88,6 +88,16 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         );
     }
 
+    // the parts kept as read (the sensitivity label, the ribbon...)
+    for (id, rel_type, target) in wb.package_relationships().write_parts(writer_mng)? {
+        write_start_tag(
+            &mut writer,
+            "Relationship",
+            vec![("Id", &id).into(), ("Type", &rel_type).into(), ("Target", &target).into()],
+            true,
+        );
+    }
+
     write_end_tag(&mut writer, "Relationships");
 
     let target = "_rels/.rels";

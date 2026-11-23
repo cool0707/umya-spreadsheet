@@ -408,6 +408,15 @@ impl Image {
     }
 
     #[inline]
+    /// The anchor as it was read (of a group of shapes), while the model has
+    /// not been changed.
+    pub(crate) fn kept_unchanged(&self) -> Option<&crate::structs::drawing::spreadsheet::KeptAnchor> {
+        if let Some(anchor) = self.two_cell_anchor() {
+            return anchor.kept_unchanged();
+        }
+        self.one_cell_anchor().and_then(|a| a.kept_unchanged())
+    }
+
     pub(crate) fn write_to(
         &self,
         writer: &mut Writer<Cursor<Vec<u8>>>,

@@ -211,3 +211,10 @@ pub(crate) fn read_raw_element<R: io::BufRead>(
     }
     String::from_utf8(writer.into_inner()).unwrap()
 }
+
+/// The value of an attribute with its character references replaced (`&amp;`
+/// -> `&`), as the writer escapes it again.
+pub(crate) fn unescaped_attribute_value(attr: &Attribute) -> String {
+    let raw = String::from_utf8_lossy(&attr.value);
+    quick_xml::escape::unescape(&raw).map_or_else(|_| raw.to_string(), |v| v.to_string())
+}

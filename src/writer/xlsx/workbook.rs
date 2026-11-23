@@ -68,18 +68,25 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         false,
     );
 
-    // fileVersion
-    write_start_tag(
-        &mut writer,
-        "fileVersion",
-        vec![
-            ("appName", "xl").into(),
-            ("lastEdited", "5").into(),
-            ("lowestEdited", "4").into(),
-            ("rupBuild", "9302").into(),
-        ],
-        true,
-    );
+    // fileVersion (as read, or Excel's)
+    if !wb.kept_relationships().xml("fileVersion").is_empty() {
+        write_kept(wb, &mut writer, "fileVersion");
+    } else {
+        write_start_tag(
+            &mut writer,
+            "fileVersion",
+            vec![
+                ("appName", "xl").into(),
+                ("lastEdited", "5").into(),
+                ("lowestEdited", "4").into(),
+                ("rupBuild", "9302").into(),
+            ],
+            true,
+        );
+    }
+
+    // fileSharing (kept as read)
+    write_kept(wb, &mut writer, "fileSharing");
 
     // workbookPr
     let mut attributes: crate::structs::AttrCollection = Vec::new();
@@ -87,9 +94,13 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         attributes.push(("date1904", "1").into());
     }
     attributes.push(("filterPrivacy", "1").into());
-    // attributes.push(("defaultThemeVersion", "124226").into());
     if wb.has_macros() {
         attributes.push(("codeName", wb.code_name().unwrap_or("ThisWorkbook")).into());
+    } else if let Some(code_name) = wb.code_name() {
+        attributes.push(("codeName", code_name).into());
+    }
+    for (k, v) in wb.workbook_pr_attributes() {
+        attributes.push((&**k, &**v).into());
     }
     write_start_tag(&mut writer, "workbookPr", attributes, true);
 
@@ -128,10 +139,11 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     }
     write_end_tag(&mut writer, "sheets");
 
+    // functionGroups (kept as read)
+    write_kept(wb, &mut writer, "functionGroups");
+
     // externalReferences (kept as read, with the external links)
-    for xml in wb.kept_relationships().xml("externalReferences") {
-        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
-    }
+    write_kept(wb, &mut writer, "externalReferences");
 
     // definedNames
     if wb.has_defined_names() {
@@ -152,6 +164,10 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     // calcPr
     wb.calculation_properties().write_to(&mut writer);
 
+    // oleSize, customWorkbookViews (kept as read)
+    write_kept(wb, &mut writer, "oleSize");
+    write_kept(wb, &mut writer, "customWorkbookViews");
+
     // pivotCaches
     let pivot_cache_definition_collection = wb.pivot_caches();
     if !pivot_cache_definition_collection.is_empty() {
@@ -170,16 +186,24 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     }
 
     // pivotCaches (kept as read, with the pivot tables)
-    for xml in wb.kept_relationships().xml("pivotCaches") {
-        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
+    write_kept(wb, &mut writer, "pivotCaches");
+
+    // smartTagPr ... webPublishObjects (kept as read)
+    for name in ["smartTagPr", "smartTagTypes", "webPublishing", "fileRecoveryPr", "webPublishObjects"] {
+        write_kept(wb, &mut writer, name);
     }
 
     // extLst (kept as read: slicer and timeline caches, ...)
-    for xml in wb.kept_relationships().xml("extLst") {
-        crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
-    }
+    write_kept(wb, &mut writer, "extLst");
 
     write_end_tag(&mut writer, "workbook");
 
     writer_mng.add_writer(PKG_WORKBOOK, writer)
+}
+
+/// Writes the elements named `name` kept as they were read.
+fn write_kept(wb: &Workbook, writer: &mut Writer<io::Cursor<Vec<u8>>>, name: &str) {
+    for xml in wb.kept_relationships().xml(name) {
+        crate::writer::driver::write_text_node_no_escape(writer, xml);
+    }
 }

@@ -71,7 +71,8 @@ use crate::{
 const MAX_DEPTH: usize = 8;
 
 /// The folders of the parts kept as they were read (and what those refer to).
-const KEPT_FOLDERS: [&str; 12] = [
+const KEPT_FOLDERS: [&str; 13] = [
+    "xl/queryTables/",
     "xl/charts/",
     "xl/pivotTables/",
     "xl/pivotCache/",
@@ -114,12 +115,10 @@ impl PartStore {
             })
             .map(str::to_string)
             .collect();
-        if charts.is_empty() {
-            return store;
-        }
-        // The pictures of the ActiveX controls of the sheets (what Excel shows
-        // in their place: the `r:id` of their `controlPr`), from the sheets'
-        // relationships.
+        // What elements of the sheets kept as read may refer to: the pictures
+        // of the ActiveX controls (what Excel shows in their place: the `r:id`
+        // of their `controlPr`) and the background picture (`picture`), the
+        // printer settings of custom views, custom properties.
         let mut pictures = Vec::new();
         let sheet_rels: Vec<String> = arv
             .file_names()
@@ -128,13 +127,45 @@ impl PartStore {
             .collect();
         for name in sheet_rels {
             let Some(rels) = read_part(arv, &name) else { continue };
-            let rels = read_relationships(&rels);
-            if !rels.iter().any(|r| r.rel_type.ends_with("/control")) {
+            for rel in read_relationships(&rels) {
+                if !rel.external && is_sheet_kept_target(&rel.rel_type) {
+                    pictures.push((join_paths("xl/worksheets", &rel.target), 0));
+                }
+            }
+        }
+        // The parts of the workbook and of the package kept (in folders of
+        // their own or not: `xl/connections.xml`, `docMetadata/LabelInfo.xml`),
+        // the query tables of the tables.
+        let seeds: [(&str, &str, fn(&str) -> bool); 2] = [
+            ("xl/_rels/workbook.xml.rels", "xl", KeptRelationships::is_kept_type),
+            ("_rels/.rels", "", is_package_kept_type),
+        ];
+        for (rels_name, dir, kept) in seeds {
+            let Some(rels) = read_part(arv, rels_name) else { continue };
+            for rel in read_relationships(&rels) {
+                if !rel.external && kept(&rel.rel_type) {
+                    pictures.push((join_part(dir, &rel.target), 0));
+                }
+            }
+        }
+        let table_rels: Vec<String> = arv
+            .file_names()
+            .filter(|n| n.starts_with("xl/tables/_rels/") && extension(n).eq_ignore_ascii_case("rels"))
+            .map(str::to_string)
+            .collect();
+        for name in table_rels {
+            let Some(rels) = read_part(arv, &name) else { continue };
+            let list = read_relationships(&rels);
+            if !list.iter().any(|r| KeptRelationships::is_kept_type(&r.rel_type)) {
                 continue;
             }
-            for rel in rels.iter().filter(|r| !r.external && r.rel_type.ends_with("/image")) {
-                pictures.push((join_paths("xl/worksheets", &rel.target), 0));
+            for rel in list.iter().filter(|r| !r.external && KeptRelationships::is_kept_type(&r.rel_type)) {
+                pictures.push((join_paths("xl/tables", &rel.target), 0));
             }
+            store.files.insert(name, rels);
+        }
+        if charts.is_empty() && pictures.is_empty() {
+            return store;
         }
         if let Some(data) = read_part(arv, CONTENT_TYPES) {
             store.read_content_types(&data);
@@ -210,6 +241,20 @@ impl PartStore {
         } else {
             "application/octet-stream".to_string()
         }
+    }
+
+    /// The relationships of the part at `path` (a table) of types kept, read
+    /// from the file: (id, type, the part they go to).
+    pub(crate) fn kept_relationships_of(&self, path: &str) -> Vec<(String, String, String)> {
+        let Some(rels) = self.files.get(&rels_path(path)) else { return Vec::new() };
+        read_relationships(rels)
+            .into_iter()
+            .filter(|r| !r.external && KeptRelationships::is_kept_type(&r.rel_type))
+            .map(|r| {
+                let target = join_paths(directory(path), &r.target);
+                (r.id, r.rel_type, target)
+            })
+            .collect()
     }
 
     /// The part and the parts it refers to, when it is in the store.
@@ -299,34 +344,13 @@ impl KeptPart {
             });
         }
 
-        let mut writer = Writer::new(Cursor::new(Vec::new()));
-        writer
-            .write_event(Event::Decl(BytesDecl::new(
-                "1.0",
-                Some("UTF-8"),
-                Some("yes"),
-            )))
-            .unwrap();
-        write_new_line(&mut writer);
-        write_start_tag(
-            &mut writer,
-            "Relationships",
-            vec![("xmlns", REL_NS).into()],
-            false,
-        );
-        for (relationship, target) in self.relationships.iter().zip(&targets) {
-            let mut attributes: crate::structs::AttrCollection = vec![
-                ("Id", &relationship.id).into(),
-                ("Type", &relationship.rel_type).into(),
-                ("Target", target).into(),
-            ];
-            if relationship.external {
-                attributes.push(("TargetMode", "External").into());
-            }
-            write_start_tag(&mut writer, "Relationship", attributes, true);
-        }
-        write_end_tag(&mut writer, "Relationships");
-        writer_mng.add_writer(&rels_path(&path), writer)?;
+        let list: Vec<(&str, &str, &str, bool)> = self
+            .relationships
+            .iter()
+            .zip(&targets)
+            .map(|(r, target)| (r.id.as_str(), r.rel_type.as_str(), target.as_str(), r.external))
+            .collect();
+        write_relationships_part(writer_mng, &rels_path(&path), &list)?;
         Ok(path)
     }
 
@@ -414,7 +438,7 @@ impl KeptRelationships {
             rel_type.rsplit('/').next(),
             Some(
                 "externalLink" | "slicerCache" | "timelineCache" | "customXml" | "slicer" | "timeline" | "ctrlProp" | "control"
-                    | "pivotTable" | "pivotCacheDefinition"
+                    | "pivotTable" | "pivotCacheDefinition" | "connections" | "queryTable" | "powerPivotData"
             )
         )
     }
@@ -508,14 +532,31 @@ impl KeptRelationships {
         self.xml
             .iter()
             .filter(|(n, _)| n == name)
-            .map(|(_, xml)| {
-                let mut xml = self.with_namespaces(xml);
-                for (n, (id, _, _)) in self.list.iter().enumerate() {
-                    xml = xml.replace(&format!("r:id=\"{id}\""), &format!("r:id=\"{}\"", Self::new_id(n)));
-                }
-                xml
-            })
+            .map(|(_, xml)| self.with_new_ids(&self.with_namespaces(xml)))
             .collect()
+    }
+
+    /// The XML with the ids read (`r:id="rId3"`) replaced by those the
+    /// relationships are written with, in one pass (an id read may be one
+    /// written: `rIdKept2`).
+    fn with_new_ids(&self, xml: &str) -> String {
+        const ATTR: &str = "r:id=\"";
+        let mut out = String::with_capacity(xml.len());
+        let mut rest = xml;
+        while let Some(i) = rest.find(ATTR) {
+            let start = i + ATTR.len();
+            out.push_str(&rest[..start]);
+            rest = &rest[start..];
+            let end = rest.find('"').unwrap_or(rest.len());
+            let id = &rest[..end];
+            match self.list.iter().position(|(read, _, _)| read == id) {
+                Some(n) => out.push_str(&Self::new_id(n)),
+                None => out.push_str(id),
+            }
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
     }
 
     fn with_namespaces(&self, xml: &str) -> String {
@@ -535,6 +576,49 @@ impl KeptRelationships {
         }
         Ok(out)
     }
+}
+
+/// Whether the package's relationship (`_rels/.rels`) of this type goes to
+/// a part the model has nothing for, kept as read: the sensitivity label
+/// (`docMetadata/LabelInfo.xml`), the customized ribbon (`customUI`), add-ins
+/// of the task pane... All but the workbook and its properties, which the
+/// model writes, the thumbnail and the digital signatures (which would not
+/// match what is written).
+pub(crate) fn is_package_kept_type(rel_type: &str) -> bool {
+    !matches!(
+        rel_type.rsplit('/').next(),
+        Some("officeDocument" | "core-properties" | "extended-properties" | "custom-properties" | "thumbnail" | "origin")
+    )
+}
+
+/// The part a relationship of a part in `dir` goes to ("" for the package).
+pub(crate) fn join_part(dir: &str, target: &str) -> String {
+    if dir.is_empty() {
+        normalize_part(target.trim_start_matches('/'))
+    } else {
+        join_paths(dir, target)
+    }
+}
+
+fn normalize_part(path: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s),
+        }
+    }
+    out.join("/")
+}
+
+/// The relationships of a sheet kept when an element kept as read refers to
+/// them (`r:id`): pictures, printer settings (of custom views), custom
+/// properties. The model reads others of the same types for itself.
+pub(crate) fn is_sheet_kept_target(rel_type: &str) -> bool {
+    matches!(rel_type.rsplit('/').next(), Some("image" | "printerSettings" | "customProperty"))
 }
 
 /// The namespaces (`xmlns:xr9`...) a root element declares, but the default one.
@@ -890,6 +974,49 @@ fn free_name<W: io::Seek + io::Write>(writer_mng: &mut WriterManager<W>, path: &
             return new_path;
         }
     }
+}
+
+/// Writes a relationships part (`.rels`) at `path`: (id, type, target,
+/// external).
+pub(crate) fn write_relationships_part<W: io::Seek + io::Write>(
+    writer_mng: &mut WriterManager<W>,
+    path: &str,
+    list: &[(&str, &str, &str, bool)],
+) -> Result<(), XlsxError> {
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    writer
+        .write_event(Event::Decl(BytesDecl::new(
+            "1.0",
+            Some("UTF-8"),
+            Some("yes"),
+        )))
+        .unwrap();
+    write_new_line(&mut writer);
+    write_start_tag(
+        &mut writer,
+        "Relationships",
+        vec![("xmlns", REL_NS).into()],
+        false,
+    );
+    for (id, rel_type, target, external) in list {
+        let mut attributes: crate::structs::AttrCollection = vec![
+            ("Id", *id).into(),
+            ("Type", *rel_type).into(),
+            ("Target", *target).into(),
+        ];
+        if *external {
+            attributes.push(("TargetMode", "External").into());
+        }
+        write_start_tag(&mut writer, "Relationship", attributes, true);
+    }
+    write_end_tag(&mut writer, "Relationships");
+    writer_mng.add_writer(path, writer)
+}
+
+/// The name of the relationships part of a part (`xl/tables/table1.xml` ->
+/// `xl/tables/_rels/table1.xml.rels`).
+pub(crate) fn relationships_path(path: &str) -> String {
+    rels_path(path)
 }
 
 pub(crate) fn read_part<R: Read + io::Seek>(

@@ -25,8 +25,20 @@ pub struct Table {
     /// its parts (`headerRowDxfId`, `dataDxfId`, `totalsRowDxfId`, the
     /// border ones, the cell styles), `insertRow`, `tableType`...
     other_attributes: Vec<(Box<str>, Box<str>)>,
+    /// The parts the table refers to that the model has nothing for, kept as
+    /// read: the query table of a table of external data (Power Query, a
+    /// text file, a database), which says how it is refreshed.
+    kept_relationships: crate::structs::KeptRelationships,
 }
 impl Table {
+    pub(crate) fn kept_relationships(&self) -> &crate::structs::KeptRelationships {
+        &self.kept_relationships
+    }
+
+    pub(crate) fn kept_relationships_mut(&mut self) -> &mut crate::structs::KeptRelationships {
+        &mut self.kept_relationships
+    }
+
     #[inline]
     pub fn new<T>(name: &str, area: (T, T)) -> Self
     where
@@ -48,6 +60,7 @@ impl Table {
             header_row_count: UInt32Value::default(),
             auto_filter,
             other_attributes: Vec::new(),
+            kept_relationships: crate::structs::KeptRelationships::default(),
         }
     }
 
