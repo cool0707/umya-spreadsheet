@@ -80,6 +80,9 @@ pub enum XlsxError {
     NotDeserialized(),
     /// name duplicate error
     NameDuplicate(),
+    /// A name Excel does not take (of a defined name: empty, with a space,
+    /// like a cell reference...).
+    InvalidName(String),
 }
 
 from_err!(std::io::Error, XlsxError, Io);
@@ -95,6 +98,7 @@ impl fmt::Display for XlsxError {
             NotFound,
             NotDeserialized,
             NameDuplicate,
+            InvalidName,
             Io,
             Uft8,
             Xml,
@@ -109,6 +113,7 @@ impl fmt::Display for XlsxError {
             NotFound() => write!(f, "Not Found"),
             NotDeserialized() => write!(f, "Not Deserialized: This Worksheet is Not Deserialized. Please exec to read_sheet(&mut self, index: usize)"),
             NameDuplicate() => write!(f, "Name Duplicate"),
+            InvalidName(n) => write!(f, "Invalid Name: '{n}'"),
         }
     }
 }

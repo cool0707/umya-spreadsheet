@@ -61,6 +61,7 @@
 | ファイルを書いたアプリケーションの版（`fileVersion`） | `Workbook::file_version` / `set_file_version`。新しいブックは Excel のもの（`FileVersion::excel`） |
 | エラーチェックを無視するセル（`ignoredErrors`） | `Worksheet::ignored_errors` / `ignored_errors_mut` / `add_ignored_error`（`IgnoredError`・`IgnoredErrorKind`）。行・列の挿入と削除で範囲が動き、すべて消えたものは消す |
 | シートを開いたときに全部を計算し直すか（`sheetCalcPr`） | `Worksheet::full_calc_on_load` / `set_full_calc_on_load` |
+| 名前の定義: スコープ（ブックかシート）を指定した追加・検索・削除、すべての名前とスコープ、コメント・マクロを名前として登録したもの（`function`・`vbProcedure`・`xlm`・関数の分類・ショートカットキー・説明など） | `Workbook::add_defined_name` / `defined_name` / `defined_name_mut` / `remove_defined_name` / `all_defined_names`、`DefinedName::comment` / `set_comment` / `function` / `set_function` などと `attribute` / `set_attribute`、名前に使えるかは `is_valid_defined_name`。モデルはシートを指す名前をスコープによらずそのシートに持つので、スコープは `localSheetId` で決まる |
 
 ## 3. 保存で落ちないようにしたもの
 
@@ -132,7 +133,9 @@
   マクロのないブックのシートの `codeName`
 - **保護のパスワード**: シート・ブック・変更履歴の保護のパスワードのハッシュが Excel と違い、このクレートで設定したパスワードを Excel が受け付けなかった
   （SHA-512 を繰り返す各回で、前の回のハッシュではなく全部を 1 つのハッシュに足していた）。Excel が書いた `sheet_lock.xlsx` のハッシュで確かめる
-- **名前の定義**: `function`・`vbProcedure`・`comment` などの属性（マクロを名前として登録したもの）
+- **名前の定義**: `function`・`vbProcedure`・`comment` などの属性（マクロを名前として登録したもの）。`DefinedName::set_address` が前の参照を消さずに足していた
+  （範囲でない数式は最後の部分だけが残った）。シートを削除すると、後ろのシートの名前の `localSheetId` がずれて別のシートの名前になり、ブックの名前のうち
+  そのシートに持っていたものが消えていた。Excel と同じく、削除したシートの名前は消し、ほかの名前はそのシートへの参照を `#REF!` にする
 - **ハイパーリンク**: `display`
 - **行・列の挿入と削除、シートのコピー**: Excel と同じように参照を付け替える（`Workbook::edit_lines` / `copy_sheet`）
 
@@ -176,5 +179,6 @@
   - `tests/excel_features.rs`: Excel が作ったブックの機能、ActiveX、SmartArt。
   - `tests/format_fidelity.rs`: モデルから読めるもの、属性。
   - `tests/vba_project.rs`: VBA と署名。
+  - `tests/defined_names.rs`: 名前の定義の編集。
   - `tests/workbook_settings.rs`: ふりがな・`fileVersion`・`fileSharing`・`ignoredErrors`・`sheetCalcPr` の設定。
   - `tests/kept_as_read.rs`: 読んだまま持つもの（接続とクエリ、パッケージの部品、ユーザー設定のビューとシート・ブックの要素、ヘッダー・フッターの画像、図形・画像・テーマ・メモの枠、埋め込み）。
