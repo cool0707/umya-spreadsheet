@@ -69,24 +69,15 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     );
 
     // fileVersion (as read, or Excel's)
-    if wb.kept_relationships().xml("fileVersion").is_empty() {
-        write_start_tag(
-            &mut writer,
-            "fileVersion",
-            vec![
-                ("appName", "xl").into(),
-                ("lastEdited", "5").into(),
-                ("lowestEdited", "4").into(),
-                ("rupBuild", "9302").into(),
-            ],
-            true,
-        );
-    } else {
-        write_kept(wb, &mut writer, "fileVersion");
+    match wb.file_version() {
+        Some(v) => v.write_to(&mut writer),
+        None => crate::structs::FileVersion::excel().write_to(&mut writer),
     }
 
-    // fileSharing (kept as read)
-    write_kept(wb, &mut writer, "fileSharing");
+    // fileSharing
+    if let Some(v) = wb.file_sharing() {
+        v.write_to(&mut writer);
+    }
 
     // workbookPr
     let mut attributes: crate::structs::AttrCollection = Vec::new();

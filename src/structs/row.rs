@@ -45,6 +45,8 @@ pub struct Row {
     hidden:        BooleanValue,
     outline_level: ByteValue,
     collapsed:     BooleanValue,
+    /// Whether the furigana of its cells are shown (`ph`).
+    phonetic:      BooleanValue,
     style:         Box<Style>,
 }
 impl Default for Row {
@@ -60,6 +62,7 @@ impl Default for Row {
             hidden:        BooleanValue::default(),
             outline_level: ByteValue::default(),
             collapsed:     BooleanValue::default(),
+            phonetic:      BooleanValue::default(),
             style:         Box::new(Style::default()),
         }
     }
@@ -225,6 +228,20 @@ impl Row {
         self
     }
 
+    /// Whether the furigana of the row are shown (Excel's "show phonetic
+    /// field" for the whole row: `ph`).
+    #[inline]
+    #[must_use]
+    pub fn show_phonetic(&self) -> bool {
+        self.phonetic.value()
+    }
+
+    #[inline]
+    pub fn set_show_phonetic(&mut self, value: bool) -> &mut Self {
+        self.phonetic.set_value(value);
+        self
+    }
+
     #[inline]
     #[must_use]
     pub fn style(&self) -> &Style {
@@ -279,6 +296,7 @@ impl Row {
         set_string_from_xml!(self, e, hidden, "hidden");
         set_string_from_xml!(self, e, outline_level, "outlineLevel");
         set_string_from_xml!(self, e, collapsed, "collapsed");
+        set_string_from_xml!(self, e, phonetic, "ph");
 
         if let Some(v) = get_attribute(e, b"x14ac:dyDescent") {
             if !v.is_empty() {
@@ -376,6 +394,9 @@ impl Row {
         }
         if self.collapsed.value() {
             attributes.push(("collapsed", "1").into());
+        }
+        if self.phonetic.value() {
+            attributes.push(("ph", "1").into());
         }
         let descent = self.descent.value_string();
         if self.descent.has_value() {

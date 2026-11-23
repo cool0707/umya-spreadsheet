@@ -526,8 +526,7 @@ impl KeptRelationships {
     /// removed; takes away what goes with the cells removed, and an element
     /// left with nothing in it.
     pub(crate) fn shift_elements(&mut self, edit: &crate::helper::rewrite::LineEdit) {
-        const MOVED: [&str; 7] =
-            ["protectedRanges", "ignoredErrors", "customSheetViews", "sortState", "scenarios", "cellWatches", "smartTags"];
+        const MOVED: [&str; 6] = ["protectedRanges", "customSheetViews", "sortState", "scenarios", "cellWatches", "smartTags"];
         self.xml.retain_mut(|(name, xml)| {
             if !MOVED.contains(&name.as_str()) {
                 return true;
@@ -540,7 +539,7 @@ impl KeptRelationships {
                 *xml = kept;
             }
             // (These hold one or more of their children.)
-            !matches!(name.as_str(), "protectedRanges" | "ignoredErrors" | "cellWatches" | "smartTags")
+            !matches!(name.as_str(), "protectedRanges" | "cellWatches" | "smartTags")
                 || has_child(xml)
         });
     }

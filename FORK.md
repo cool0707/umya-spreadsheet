@@ -56,6 +56,11 @@
 | 図形を印刷するか・ロックするか、代替テキスト、画像やコネクタのマクロ | `ClientData`、`NonVisualDrawingProperties::description` / `title`、`Picture::set_macro` |
 | 「'」を付けて入力した文字列、ピボットのボタン | `Style::quote_prefix` / `pivot_button` |
 | VBA プロジェクトの署名 | `Workbook::has_vba_signature`。プロジェクトを置き換えると消える |
+| ふりがなの設定（種類・配置・フォント）: シートの既定と文字列ごと。ふりがなを表示するセル・行・列 | `Worksheet::phonetic_properties` / `set_phonetic_properties`、`CellValue::phonetic_properties` / `set_phonetic_properties` / `set_phonetic_runs`（`PhoneticProperties`・`PhoneticType`・`PhoneticAlignment`）、`Cell` / `Row` / `Column::set_show_phonetic` |
+| 書き込みのパスワードと読み取り専用の推奨（`fileSharing`） | `Workbook::file_sharing` / `file_sharing_mut`（`FileSharing::set_password`・`check_password`・`set_read_only_recommended`。パスワードは Excel 2013 以降と同じ SHA-512。Excel 2007 の `reservationPassword` も確かめられる） |
+| ファイルを書いたアプリケーションの版（`fileVersion`） | `Workbook::file_version` / `set_file_version`。新しいブックは Excel のもの（`FileVersion::excel`） |
+| エラーチェックを無視するセル（`ignoredErrors`） | `Worksheet::ignored_errors` / `ignored_errors_mut` / `add_ignored_error`（`IgnoredError`・`IgnoredErrorKind`）。行・列の挿入と削除で範囲が動き、すべて消えたものは消す |
+| シートを開いたときに全部を計算し直すか（`sheetCalcPr`） | `Worksheet::full_calc_on_load` / `set_full_calc_on_load` |
 
 ## 3. 保存で落ちないようにしたもの
 
@@ -106,7 +111,7 @@
   - オートフィルターのボタンを隠した列
   - フィルターの日付のグループ・色・アイコン
   - 行と列のグループ
-  - ふりがな（セルの `rPh`、シートと文字列の `phoneticPr` の種類）
+  - ふりがな（セルの `rPh`、シートと文字列の `phoneticPr`、行の `ph`・列の `phonetic`）
 - **ブック**: シート見出し・スクロールバーの表示、シートの名前の変更に付いてくる参照
 - **入力規則**: 2 つの数式の条件、停止・注意・情報の種類、IME の設定。メッセージを文字参照（`&#25968;`）で書いたものが二重にエスケープされていた
 - **描画**:
@@ -119,12 +124,14 @@
     `a14:hiddenFill` など、グラデーション）。アンカーを読んだまま書く（3 の仕組み）。フォームコントロールの図形（`a14:compatExt`）はモデルから書く
 - **コメント**: スレッド形式のコメントの作者・返信・解決済み。メモの枠の書式（塗り・線の矢印・文字の配置）と、Excel のテキストボックス以外の形の定義（`v:shapetype`）
 - **テーマ**: 新しく描く図形の既定のスタイル（`objectDefaults`）、グラデーションの形（`fillToRect`・`path`）、拡張。読んだまま書く（3 の仕組み）
-- **ブック（`workbook.xml`）**: `fileVersion`、書き込みのパスワードと読み取り専用の推奨（`fileSharing`）、`workbookPr` の属性（`showObjects`・`backupFile`・`codeName` など）、
+- **ブック（`workbook.xml`）**: `fileVersion`・書き込みのパスワードと読み取り専用の推奨（`fileSharing`。どちらも 2.2 のとおりモデルから設定できる）、`workbookPr` の属性（`showObjects`・`backupFile`・`codeName` など）、
   ユーザー設定のビュー（`customWorkbookViews`）、`oleSize`、スマートタグ、Web 公開、`fileRecoveryPr`
-- **シート**: 計算の設定（`sheetCalcPr`）、範囲の編集の許可（`protectedRanges`）、シナリオ、並べ替え（`sortState`）、統合（`dataConsolidate`）、
-  ユーザー設定のビュー（`customSheetViews`。ビューごとのプリンターの設定も）、エラーチェックを無視するセル（`ignoredErrors`）、スマートタグ、
+- **シート**: 計算の設定（`sheetCalcPr`。モデル）、範囲の編集の許可（`protectedRanges`）、シナリオ、並べ替え（`sortState`）、統合（`dataConsolidate`）、
+  ユーザー設定のビュー（`customSheetViews`。ビューごとのプリンターの設定も）、エラーチェックを無視するセル（`ignoredErrors`。モデル）、スマートタグ、
   ユーザー設定のプロパティ（`customProperties`）、ウォッチ、ヘッダー・フッターの画像（`legacyDrawingHF` とその VML）、背景の画像（`picture`）、Web 公開、`sheetPr` の属性と `outlinePr`（グループの集計行の位置）、
   マクロのないブックのシートの `codeName`
+- **保護のパスワード**: シート・ブック・変更履歴の保護のパスワードのハッシュが Excel と違い、このクレートで設定したパスワードを Excel が受け付けなかった
+  （SHA-512 を繰り返す各回で、前の回のハッシュではなく全部を 1 つのハッシュに足していた）。Excel が書いた `sheet_lock.xlsx` のハッシュで確かめる
 - **名前の定義**: `function`・`vbProcedure`・`comment` などの属性（マクロを名前として登録したもの）
 - **ハイパーリンク**: `display`
 - **行・列の挿入と削除、シートのコピー**: Excel と同じように参照を付け替える（`Workbook::edit_lines` / `copy_sheet`）
@@ -142,7 +149,7 @@
 | — | `.xlsb` | 読めない。RAS の `crates/ras-ovba` が VBA の部分だけを読む |
 
 読んだまま持つシートの要素は、行・列の挿入と削除で範囲とセルが動く（`KeptRelationships::shift_elements`。`edit_lines` でも `insert_new_row` などでも）:
-範囲の編集の許可・エラーチェックを無視するセル・ウォッチ・スマートタグ（範囲がすべて消えたら要素ごと消す）、並べ替え、シナリオ、
+範囲の編集の許可・ウォッチ・スマートタグ（範囲がすべて消えたら要素ごと消す）、並べ替え、シナリオ、
 ユーザー設定のビューのウィンドウ枠・選択範囲・改ページ（消えた行・列の改ページは消し、数を数え直す）・フィルター（範囲と、列の番号 `colId`。
 消えた列のフィルターは消す）。統合（`dataConsolidate`）の参照元はほかのシートのことが多いので動かさない。
 
@@ -169,4 +176,5 @@
   - `tests/excel_features.rs`: Excel が作ったブックの機能、ActiveX、SmartArt。
   - `tests/format_fidelity.rs`: モデルから読めるもの、属性。
   - `tests/vba_project.rs`: VBA と署名。
+  - `tests/workbook_settings.rs`: ふりがな・`fileVersion`・`fileSharing`・`ignoredErrors`・`sheetCalcPr` の設定。
   - `tests/kept_as_read.rs`: 読んだまま持つもの（接続とクエリ、パッケージの部品、ユーザー設定のビューとシート・ブックの要素、ヘッダー・フッターの画像、図形・画像・テーマ・メモの枠、埋め込み）。

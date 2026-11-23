@@ -70,6 +70,10 @@ pub struct Workbook {
     /// nothing for, kept as read: the sensitivity label, the customized
     /// ribbon, add-ins of the task pane...
     package_relationships: crate::structs::KeptRelationships,
+    /// The version of the application that wrote the file (`fileVersion`).
+    file_version:          Option<crate::structs::FileVersion>,
+    /// The password to modify and read-only recommended (`fileSharing`).
+    file_sharing:          Option<crate::structs::FileSharing>,
 }
 
 impl Workbook {
@@ -1292,6 +1296,36 @@ impl Workbook {
         if let Some(value) = value {
             self.workbook_pr_attributes.push((name.into(), value.into()));
         }
+        self
+    }
+
+    /// The version of the application that wrote the file (`fileVersion`);
+    /// None for a new workbook, which is written with Excel's
+    /// ([`crate::structs::FileVersion::excel`]).
+    #[must_use]
+    pub fn file_version(&self) -> Option<&crate::structs::FileVersion> {
+        self.file_version.as_ref()
+    }
+
+    pub fn set_file_version(&mut self, value: Option<crate::structs::FileVersion>) -> &mut Self {
+        self.file_version = value;
+        self
+    }
+
+    /// The password to modify the file and whether Excel recommends opening
+    /// it read-only (`fileSharing`: "General Options" of "Save As").
+    #[must_use]
+    pub fn file_sharing(&self) -> Option<&crate::structs::FileSharing> {
+        self.file_sharing.as_ref()
+    }
+
+    /// The sharing of the file, made when there is none.
+    pub fn file_sharing_mut(&mut self) -> &mut crate::structs::FileSharing {
+        self.file_sharing.get_or_insert_with(Default::default)
+    }
+
+    pub fn set_file_sharing(&mut self, value: Option<crate::structs::FileSharing>) -> &mut Self {
+        self.file_sharing = value;
         self
     }
 

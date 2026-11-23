@@ -437,6 +437,38 @@ impl CellValue {
         ))
     }
 
+    /// How the furigana of the text are shown (its Phonetic Settings: the
+    /// kind of characters, the alignment, the font). None when the text has
+    /// neither furigana nor settings of its own (the sheet's are used).
+    #[must_use]
+    pub fn phonetic_properties(&self) -> Option<crate::structs::PhoneticProperties> {
+        let raw = self.phonetic()?;
+        let at = raw.find("<phoneticPr")?;
+        let tag = &raw[at..at + raw[at..].find('>')?];
+        Some(crate::structs::PhoneticProperties::parse(tag))
+    }
+
+    /// Sets how the furigana of the text are shown, keeping its furigana
+    /// (`None`: the default, and no settings of its own when it has no
+    /// furigana). A cell without text takes none.
+    pub fn set_phonetic_properties(&mut self, value: Option<&crate::structs::PhoneticProperties>) -> &mut Self {
+        let Some(text) = self.current_text() else {
+            self.phonetic = None;
+            return self;
+        };
+        let runs: String = self.phonetic().map(|raw| raw[..raw.find("<phoneticPr").unwrap_or(raw.len())].to_string()).unwrap_or_default();
+        let raw = match value {
+            Some(p) => format!("{runs}{}", p.to_xml()),
+            None if runs.is_empty() => {
+                self.phonetic = None;
+                return self;
+            }
+            None => format!("{runs}{}", crate::structs::PhoneticProperties::default().to_xml()),
+        };
+        self.phonetic = Some((text.into(), raw.into()));
+        self
+    }
+
     /// Gives the text of the cell these furigana: runs of (`start`, `end`
     /// in UTF-16 code units of the text, reading), written as `kind` (see
     /// [`CellValue::phonetic_type`]; None for the default). No runs remove
@@ -457,10 +489,13 @@ impl CellValue {
                 quick_xml::escape::escape(crate::helper::utils::escape_ooxml_string(reading).as_ref())
             ));
         }
-        match kind {
-            Some(k) if k != "fullwidthKatakana" => raw.push_str(&format!("<phoneticPr fontId=\"1\" type=\"{k}\"/>")),
-            _ => raw.push_str("<phoneticPr fontId=\"1\"/>"),
-        }
+        // The settings the text has (alignment, font) stay; the kind is `kind`.
+        let mut props = self.phonetic_properties().unwrap_or_default();
+        props.set_phonetic_type(
+            kind.and_then(crate::structs::PhoneticType::parse)
+                .unwrap_or_default(),
+        );
+        raw.push_str(&props.to_xml());
         self.phonetic = Some((text.into(), raw.into()));
         self
     }

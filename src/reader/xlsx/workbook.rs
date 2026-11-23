@@ -90,12 +90,15 @@ pub(crate) fn read<R: io::Read + io::Seek>(
                     let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
                     wb.kept_relationships_mut().add_xml(&name, xml);
                 }
-                // What the model has nothing for, kept as read: the version of
-                // the application that wrote the file, the password
-                // to write and the recommendation to open read-only, custom
-                // views, the size of the OLE object of the workbook, smart
+                // What the model has nothing for, kept as read: custom views, the size of the OLE object of the workbook, smart
                 // tags, publishing to the web, how the file was recovered.
-                b"fileVersion" | b"fileSharing" | b"functionGroups" | b"oleSize" | b"customWorkbookViews" | b"smartTagPr"
+                b"fileVersion" => {
+                    wb.set_file_version(Some(crate::structs::FileVersion::read(e)));
+                }
+                b"fileSharing" => {
+                    wb.set_file_sharing(Some(crate::structs::FileSharing::read(e)));
+                }
+                b"functionGroups" | b"oleSize" | b"customWorkbookViews" | b"smartTagPr"
                 | b"smartTagTypes" | b"webPublishing" | b"fileRecoveryPr" | b"webPublishObjects" => {
                     let name = String::from_utf8_lossy(e.name().into_inner()).to_string();
                     let xml = crate::reader::driver::read_raw_element(&mut reader, e, is_empty);

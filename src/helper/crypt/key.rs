@@ -188,15 +188,19 @@ pub(crate) fn convert_password_to_hash(password: &str, salt: &[u8], spin_count: 
     // Convert password to UTF-16LE bytes
     let password_bytes: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
+    // H0 = H(salt + password), Hn = H(Hn-1 + iterator) (MS-OFFCRYPTO
+    // 2.4.2.4: the hash, then the iterator, unlike the key of an encrypted
+    // package). Each step hashes the one before: they were all fed to one
+    // hash, which Excel does not take.
     let mut hasher = Sha512::new();
     hasher.update(salt);
     hasher.update(password_bytes);
-
-    // Iterate spin_count times
+    let mut hash = hasher.finalize();
     for i in 0..spin_count {
-        let i_bytes = (i as u32).to_le_bytes();
-        hasher.update(i_bytes);
+        let mut hasher = Sha512::new();
+        hasher.update(hash);
+        hasher.update((i as u32).to_le_bytes());
+        hash = hasher.finalize();
     }
-
-    hasher.finalize().to_vec()
+    hash.to_vec()
 }

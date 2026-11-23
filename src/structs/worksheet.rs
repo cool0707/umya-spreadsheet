@@ -88,6 +88,13 @@ pub struct Worksheet {
     /// The attributes of `sheetPr` read that the model has nothing for
     /// (`filterMode`, `enableFormatConditionsCalculation`...).
     sheet_pr_attributes:               Vec<(Box<str>, Box<str>)>,
+    /// How the furigana of the sheet are shown (`phoneticPr`).
+    phonetic_properties:               Option<crate::structs::PhoneticProperties>,
+    /// Whether the sheet is calculated in full when the file is opened
+    /// (`sheetCalcPr`).
+    full_calc_on_load:                 Option<bool>,
+    /// The errors not flagged in cells (`ignoredErrors`).
+    ignored_errors:                    Vec<crate::structs::IgnoredError>,
     r_id:                              Box<str>,
     sheet_id:                          Box<str>,
     title:                             Box<str>,
@@ -1669,6 +1676,60 @@ impl Worksheet {
         self.sheet_id = value.into().into_boxed_str();
     }
 
+    /// How the furigana of the sheet are shown (Excel's "Phonetic Settings"
+    /// for the sheet: the default of what is typed); None when the file does
+    /// not say (the default: full-width katakana, left).
+    #[must_use]
+    pub fn phonetic_properties(&self) -> Option<&crate::structs::PhoneticProperties> {
+        self.phonetic_properties.as_ref()
+    }
+
+    pub fn set_phonetic_properties(&mut self, value: Option<crate::structs::PhoneticProperties>) -> &mut Self {
+        self.phonetic_properties = value;
+        self
+    }
+
+    /// Whether the sheet is calculated in full when the file is opened
+    /// (`sheetCalcPr/@fullCalcOnLoad`); None when the file does not say.
+    #[must_use]
+    pub fn full_calc_on_load(&self) -> Option<bool> {
+        self.full_calc_on_load
+    }
+
+    pub fn set_full_calc_on_load(&mut self, value: Option<bool>) -> &mut Self {
+        self.full_calc_on_load = value;
+        self
+    }
+
+    /// The errors not flagged in cells (Excel's "Ignore Error" of the error
+    /// checking: the green triangle of a number stored as text and the like).
+    #[must_use]
+    pub fn ignored_errors(&self) -> &[crate::structs::IgnoredError] {
+        &self.ignored_errors
+    }
+
+    pub fn ignored_errors_mut(&mut self) -> &mut Vec<crate::structs::IgnoredError> {
+        &mut self.ignored_errors
+    }
+
+    /// Ignores the errors `errors` in the cells `sqref` (`A1 B2:C5`).
+    pub fn add_ignored_error(&mut self, error: crate::structs::IgnoredError) -> &mut Self {
+        self.ignored_errors.push(error);
+        self
+    }
+
+    /// Moves the cells of the errors not flagged; takes away those all of
+    /// whose cells are removed.
+    pub(crate) fn shift_ignored_errors(&mut self, edit: &crate::helper::rewrite::LineEdit) {
+        self.ignored_errors.retain_mut(|e| match edit.areas(e.sqref()) {
+            Some(new) => {
+                e.set_sqref(new);
+                true
+            }
+            None => false,
+        });
+    }
+
     pub(crate) fn sheet_pr_attributes(&self) -> &[(Box<str>, Box<str>)] {
         &self.sheet_pr_attributes
     }
@@ -1685,10 +1746,12 @@ impl Worksheet {
         if cols != 0 && root_col != 0 {
             let edit = if insert { LineEdit::insert_columns(root_col, cols) } else { LineEdit::remove_columns(root_col, cols) };
             self.kept_relationships.shift_elements(&edit);
+            self.shift_ignored_errors(&edit);
         }
         if rows != 0 && root_row != 0 {
             let edit = if insert { LineEdit::insert_rows(root_row, rows) } else { LineEdit::remove_rows(root_row, rows) };
             self.kept_relationships.shift_elements(&edit);
+            self.shift_ignored_errors(&edit);
         }
     }
 
@@ -2901,6 +2964,7 @@ impl Worksheet {
         let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
         self.kept_relationships.rewrite_xml(&mut rw);
         self.kept_relationships.shift_elements(edit);
+        self.shift_ignored_errors(edit);
     }
 
     /// [`Self::shift_lines`] for an edit limited to a band (cells inserted
@@ -3014,6 +3078,7 @@ impl Worksheet {
         let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
         self.kept_relationships.rewrite_xml(&mut rw);
         self.kept_relationships.shift_elements(edit);
+        self.shift_ignored_errors(edit);
     }
 
     /// Makes a copy of the sheet `old` (already given its own name) one of

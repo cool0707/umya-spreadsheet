@@ -79,19 +79,16 @@ pub(crate) fn read(
 }
 
 /// The elements of a sheet the model has nothing for, kept as read and
-/// written back in their place (`write_kept` of the writer): how the sheet
-/// is calculated, the ranges users may edit, scenarios, the sort, the
-/// consolidation, custom views, the errors not to flag, smart tags, custom
-/// properties, watches, the pictures of the headers and footers, the
-/// background picture, publishing to the web.
-pub(crate) const KEPT_ELEMENTS: [&[u8]; 13] = [
-    b"sheetCalcPr",
+/// written back in their place (`write_kept` of the writer): the ranges
+/// users may edit, scenarios, the sort, the consolidation, custom views,
+/// smart tags, custom properties, watches, the pictures of the headers and
+/// footers, the background picture, publishing to the web.
+pub(crate) const KEPT_ELEMENTS: [&[u8]; 11] = [
     b"protectedRanges",
     b"scenarios",
     b"sortState",
     b"dataConsolidate",
     b"customSheetViews",
-    b"ignoredErrors",
     b"smartTags",
     b"customProperties",
     b"cellWatches",
@@ -324,11 +321,16 @@ fn read_from_reader<R: io::BufRead>(
                 let name = String::from_utf8_lossy(name).to_string();
                 worksheet.kept_relationships_mut().add_xml(&name, xml);
             }
-            // How the furigana of the sheet are written (type, alignment):
-            // kept as read.
+            // How the furigana of the sheet are shown.
             b"phoneticPr" => {
-                let xml = crate::reader::driver::read_raw_element(&mut reader, e, true);
-                worksheet.kept_relationships_mut().add_xml("phoneticPr", xml);
+                worksheet.set_phonetic_properties(Some(crate::structs::PhoneticProperties::read(e)));
+            }
+            b"sheetCalcPr" => {
+                let full = get_attribute(e, b"fullCalcOnLoad").map(|v| v == "1" || v == "true");
+                worksheet.set_full_calc_on_load(Some(full.unwrap_or(false)));
+            }
+            b"ignoredError" => {
+                worksheet.add_ignored_error(crate::structs::IgnoredError::read(e));
             }
             b"printOptions" => {
                 worksheet

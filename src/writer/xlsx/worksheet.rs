@@ -301,7 +301,10 @@ fn write_worksheet_features(
     worksheet: &Worksheet,
     stylesheet: &mut Stylesheet,
 ) {
-    write_kept(writer, worksheet, "sheetCalcPr");
+    if let Some(full) = worksheet.full_calc_on_load() {
+        let value = if full { "1" } else { "0" };
+        write_start_tag(writer, "sheetCalcPr", vec![("fullCalcOnLoad", value).into()], true);
+    }
     if let Some(v) = worksheet.sheet_protection() {
         v.write_to(writer);
     }
@@ -316,10 +319,8 @@ fn write_worksheet_features(
     write_kept(writer, worksheet, "customSheetViews");
 
     worksheet.merge_cells_crate().write_to(writer);
-    match worksheet.kept_relationships().xml("phoneticPr").first() {
-        Some(xml) => crate::writer::driver::write_text_node_no_escape(writer, xml),
-        None => write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true),
-    }
+    let phonetic = worksheet.phonetic_properties().copied().unwrap_or_default();
+    crate::writer::driver::write_text_node_no_escape(writer, phonetic.to_xml());
 
     for conditional_formatting in worksheet.conditional_formatting_collection() {
         conditional_formatting.write_to(writer, stylesheet.differential_formats_mut());
@@ -541,7 +542,7 @@ fn write_print_settings(writer: &mut InternalWriter, worksheet: &Worksheet, r_id
     worksheet.column_breaks().write_to(writer);
     write_kept(writer, worksheet, "customProperties");
     write_kept(writer, worksheet, "cellWatches");
-    write_kept(writer, worksheet, "ignoredErrors");
+    crate::structs::IgnoredError::write_list(worksheet.ignored_errors(), writer);
     write_kept(writer, worksheet, "smartTags");
 
     r_id

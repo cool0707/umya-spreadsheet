@@ -43,6 +43,8 @@ pub struct Column {
     pub(crate) best_fit: BooleanValue,
     pub(crate) outline_level: ByteValue,
     pub(crate) collapsed: BooleanValue,
+    /// Whether the furigana of its cells are shown (`phonetic`).
+    pub(crate) phonetic: BooleanValue,
     style:               Box<Style>,
     auto_width:          BooleanValue,
 }
@@ -61,6 +63,7 @@ impl Default for Column {
             best_fit: BooleanValue::default(),
             style: Box::new(Style::default()),
             auto_width: BooleanValue::default(),
+            phonetic: BooleanValue::default(),
         }
     }
 }
@@ -146,6 +149,19 @@ impl Column {
     #[inline]
     pub fn set_collapsed(&mut self, value: bool) -> &mut Self {
         self.collapsed.set_value(value);
+        self
+    }
+
+    /// Whether the furigana of the column are shown (`phonetic`).
+    #[inline]
+    #[must_use]
+    pub fn show_phonetic(&self) -> bool {
+        self.phonetic.value()
+    }
+
+    #[inline]
+    pub fn set_show_phonetic(&mut self, value: bool) -> &mut Self {
+        self.phonetic.set_value(value);
         self
     }
 
@@ -255,12 +271,13 @@ impl Column {
     #[inline]
     pub(crate) fn hash_code(&self) -> String {
         crate::helper::utils::md5_hash(format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}{}",
             self.width.value_string(),
             self.hidden.value_string(),
             self.best_fit.value_string(),
             self.outline_level.value_string(),
             self.collapsed.value_string(),
+            self.phonetic.value_string(),
         ))
     }
 
@@ -281,6 +298,7 @@ impl Column {
         set_string_from_xml!(self, e, best_fit, "bestFit");
         set_string_from_xml!(self, e, outline_level, "outlineLevel");
         set_string_from_xml!(self, e, collapsed, "collapsed");
+        set_string_from_xml!(self, e, phonetic, "phonetic");
 
         if let Some(v) = get_attribute(e, b"style") {
             let style = stylesheet.style(v.parse::<usize>().unwrap());
