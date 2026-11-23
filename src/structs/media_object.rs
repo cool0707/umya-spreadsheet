@@ -1,9 +1,27 @@
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub struct MediaObject {
     title: Box<str>,
     name:  Box<str>,
     data:  Vec<u8>,
 }
+impl std::fmt::Debug for MediaObject {
+    /// The data as its length and a hash of it (the data of a picture is
+    /// large, and `Debug` of a model tells whether it changed).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::hash::{
+            Hash,
+            Hasher,
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.data.hash(&mut hasher);
+        f.debug_struct("MediaObject")
+            .field("title", &self.title)
+            .field("name", &self.name)
+            .field("data", &format_args!("{} bytes, {:016x}", self.data.len(), hasher.finish()))
+            .finish()
+    }
+}
+
 impl MediaObject {
     #[inline]
     pub fn image_title(&self) -> &str {

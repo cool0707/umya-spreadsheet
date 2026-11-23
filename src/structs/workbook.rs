@@ -62,6 +62,18 @@ pub struct Workbook {
     chart_parts:           PartStore,
     kept_relationships:    crate::structs::KeptRelationships,
     persons:               Vec<crate::structs::office2019::person::Person>,
+    /// The attributes of `workbookPr` read that the model has nothing for
+    /// (`showObjects`, `backupFile`, `defaultThemeVersion`...), written back
+    /// as read.
+    workbook_pr_attributes: Vec<(Box<str>, Box<str>)>,
+    /// The parts the package refers to (`_rels/.rels`) that the model has
+    /// nothing for, kept as read: the sensitivity label, the customized
+    /// ribbon, add-ins of the task pane...
+    package_relationships: crate::structs::KeptRelationships,
+    /// The version of the application that wrote the file (`fileVersion`).
+    file_version:          Option<crate::structs::FileVersion>,
+    /// The password to modify and read-only recommended (`fileSharing`).
+    file_sharing:          Option<crate::structs::FileSharing>,
 }
 
 impl Workbook {
@@ -853,8 +865,43 @@ impl Workbook {
         if self.work_sheet_collection.len() <= index {
             return Err(XlsxError::NotFound());
         }
-        self.work_sheet_collection.remove(index);
+        let removed = self.work_sheet_collection.remove(index);
+        self.names_after_removing(index, removed);
         Ok(())
+    }
+
+    /// The names after the sheet at `index` was removed, as Excel has them:
+    /// those local to it go with it, those local to the sheets after it keep
+    /// their sheets (the places in `localSheetId` move), and those of the
+    /// workbook the model kept with it stay, referring to nothing (`#REF!`).
+    fn names_after_removing(&mut self, index: usize, mut removed: Worksheet) {
+        let shift = |d: &mut DefinedName| {
+            if d.has_local_sheet_id() && d.local_sheet_id() as usize > index {
+                d.set_local_sheet_id(d.local_sheet_id() - 1);
+            }
+        };
+        self.defined_names.iter_mut().for_each(shift);
+        for sheet in &mut self.work_sheet_collection {
+            sheet.defined_names_crate_mut().iter_mut().for_each(shift);
+        }
+        let name = removed.name().to_string();
+        for d in removed.defined_names_crate_mut().drain(..) {
+            if !d.has_local_sheet_id() {
+                self.defined_names.push(d);
+            }
+        }
+        // What referred to the sheet refers to nothing.
+        let refs = |d: &mut DefinedName| {
+            let old = d.address();
+            let new = ref_error(&old, &name);
+            if new != old {
+                d.set_address(new);
+            }
+        };
+        self.defined_names.iter_mut().for_each(refs);
+        for sheet in &mut self.work_sheet_collection {
+            sheet.defined_names_crate_mut().iter_mut().for_each(refs);
+        }
     }
 
     /// Remove Work Sheet.
@@ -863,14 +910,12 @@ impl Workbook {
     /// # Return value
     /// * `Result<(), XlsxError>` - OK:removed worksheet. Err:Error.
     pub fn remove_sheet_by_name(&mut self, sheet_name: &str) -> Result<(), XlsxError> {
-        let cnt_before = self.work_sheet_collection.len();
-        self.work_sheet_collection
-            .retain(|x| x.name() != sheet_name);
-        let cnt_after = self.work_sheet_collection.len();
-        if cnt_before == cnt_after {
-            return Err(XlsxError::NotFound());
-        }
-        Ok(())
+        let index = self
+            .work_sheet_collection
+            .iter()
+            .position(|x| x.name() == sheet_name)
+            .ok_or(XlsxError::NotFound())?;
+        self.remove_sheet(index)
     }
 
     /// Add New Work Sheet.
@@ -1270,6 +1315,65 @@ impl Workbook {
         self.date1904
     }
 
+    /// An attribute of `workbookPr` read that the model has no setting for
+    /// (`showObjects`, `backupFile`...), as read.
+    #[must_use]
+    pub fn workbook_pr_attribute(&self, name: &str) -> Option<&str> {
+        self.workbook_pr_attributes.iter().find(|(k, _)| &**k == name).map(|(_, v)| &**v)
+    }
+
+    /// Sets (`Some`) or removes (`None`) an attribute of `workbookPr` the
+    /// model has no setting for (`showObjects="placeholders"`...).
+    pub fn set_workbook_pr_attribute(&mut self, name: &str, value: Option<&str>) -> &mut Self {
+        self.workbook_pr_attributes.retain(|(k, _)| &**k != name);
+        if let Some(value) = value {
+            self.workbook_pr_attributes.push((name.into(), value.into()));
+        }
+        self
+    }
+
+    /// The version of the application that wrote the file (`fileVersion`);
+    /// None for a new workbook, which is written with Excel's
+    /// ([`crate::structs::FileVersion::excel`]).
+    #[must_use]
+    pub fn file_version(&self) -> Option<&crate::structs::FileVersion> {
+        self.file_version.as_ref()
+    }
+
+    pub fn set_file_version(&mut self, value: Option<crate::structs::FileVersion>) -> &mut Self {
+        self.file_version = value;
+        self
+    }
+
+    /// The password to modify the file and whether Excel recommends opening
+    /// it read-only (`fileSharing`: "General Options" of "Save As").
+    #[must_use]
+    pub fn file_sharing(&self) -> Option<&crate::structs::FileSharing> {
+        self.file_sharing.as_ref()
+    }
+
+    /// The sharing of the file, made when there is none.
+    pub fn file_sharing_mut(&mut self) -> &mut crate::structs::FileSharing {
+        self.file_sharing.get_or_insert_with(Default::default)
+    }
+
+    pub fn set_file_sharing(&mut self, value: Option<crate::structs::FileSharing>) -> &mut Self {
+        self.file_sharing = value;
+        self
+    }
+
+    pub(crate) fn package_relationships(&self) -> &crate::structs::KeptRelationships {
+        &self.package_relationships
+    }
+
+    pub(crate) fn package_relationships_mut(&mut self) -> &mut crate::structs::KeptRelationships {
+        &mut self.package_relationships
+    }
+
+    pub(crate) fn workbook_pr_attributes(&self) -> &[(Box<str>, Box<str>)] {
+        &self.workbook_pr_attributes
+    }
+
     /// Set whether the workbook uses the 1904 date system.
     ///
     /// This only changes how serial numbers are interpreted as dates; the
@@ -1402,6 +1506,108 @@ impl Workbook {
         self.defined_names.push(value);
     }
 
+    /// The scope of a name: None for the workbook, or the place of the sheet
+    /// whose name `scope` is. `Err` when there is no such sheet.
+    fn name_scope(&self, scope: Option<&str>) -> Result<Option<usize>, XlsxError> {
+        match scope {
+            None => Ok(None),
+            Some(sheet) => self
+                .work_sheet_collection
+                .iter()
+                .position(|s| s.name().eq_ignore_ascii_case(sheet) || s.name() == sheet)
+                .map(Some)
+                .ok_or(XlsxError::NotFound()),
+        }
+    }
+
+    /// Whether `d` has the name `name` in the scope `scope` (None: the
+    /// workbook's; the place of a sheet). Names are compared as Excel does,
+    /// without case.
+    fn is_name(d: &DefinedName, name: &str, scope: Option<usize>) -> bool {
+        let same_scope = match scope {
+            None => !d.has_local_sheet_id(),
+            Some(i) => d.has_local_sheet_id() && d.local_sheet_id() as usize == i,
+        };
+        same_scope && d.name().to_lowercase() == name.to_lowercase()
+    }
+
+    /// Every defined name of the workbook, with its scope: None for the
+    /// workbook's, or the name of the sheet it is local to. (The model keeps
+    /// the names that refer to a sheet with the sheet, whatever their scope:
+    /// this lists them all.)
+    #[must_use]
+    pub fn all_defined_names(&self) -> Vec<(Option<&str>, &DefinedName)> {
+        let scope_of = |d: &DefinedName| {
+            d.has_local_sheet_id()
+                .then(|| self.work_sheet_collection.get(d.local_sheet_id() as usize).map(Worksheet::name))
+                .flatten()
+        };
+        let mut out: Vec<(Option<&str>, &DefinedName)> = self.defined_names.iter().map(|d| (scope_of(d), d)).collect();
+        for sheet in &self.work_sheet_collection {
+            out.extend(sheet.defined_names().iter().map(|d| (scope_of(d), d)));
+        }
+        out
+    }
+
+    /// The defined name `name` of the scope `scope` (None: the workbook's;
+    /// the name of a sheet: local to it).
+    #[must_use]
+    pub fn defined_name(&self, name: &str, scope: Option<&str>) -> Option<&DefinedName> {
+        let scope = self.name_scope(scope).ok()?;
+        self.defined_names
+            .iter()
+            .chain(self.work_sheet_collection.iter().flat_map(|s| s.defined_names().iter()))
+            .find(|d| Self::is_name(d, name, scope))
+    }
+
+    /// The defined name `name` of the scope `scope`, to change.
+    pub fn defined_name_mut(&mut self, name: &str, scope: Option<&str>) -> Option<&mut DefinedName> {
+        let scope = self.name_scope(scope).ok()?;
+        self.defined_names
+            .iter_mut()
+            .chain(self.work_sheet_collection.iter_mut().flat_map(|s| s.defined_names_crate_mut().iter_mut()))
+            .find(|d| Self::is_name(d, name, scope))
+    }
+
+    /// Adds the defined name `name` referring to `refers_to` (`Sheet1!$A$1:$B$5`,
+    /// a formula, a constant) in the scope `scope` (None: the workbook's; the
+    /// name of a sheet: local to it, as Excel's "Scope" in New Name).
+    /// # Errors
+    /// `InvalidName` for a name Excel does not take, `NameDuplicate` when the
+    /// scope has the name already, `NotFound` when there is no such sheet.
+    pub fn add_defined_name(&mut self, name: &str, refers_to: &str, scope: Option<&str>) -> Result<&mut DefinedName, XlsxError> {
+        if !is_valid_defined_name(name) {
+            return Err(XlsxError::InvalidName(name.to_string()));
+        }
+        let index = self.name_scope(scope)?;
+        if self.defined_name(name, scope).is_some() {
+            return Err(XlsxError::NameDuplicate());
+        }
+        let mut defined = DefinedName::default();
+        defined.set_name(name).set_address(refers_to);
+        let list = match index {
+            None => &mut self.defined_names,
+            Some(i) => {
+                defined.set_local_sheet_id(u32::try_from(i).unwrap_or(u32::MAX));
+                self.work_sheet_collection[i].defined_names_crate_mut()
+            }
+        };
+        list.push(defined);
+        Ok(list.last_mut().unwrap())
+    }
+
+    /// Removes the defined name `name` of the scope `scope`; whether there
+    /// was one.
+    pub fn remove_defined_name(&mut self, name: &str, scope: Option<&str>) -> bool {
+        let Ok(scope) = self.name_scope(scope) else { return false };
+        let before = self.all_defined_names().len();
+        self.defined_names.retain(|d| !Self::is_name(d, name, scope));
+        for sheet in &mut self.work_sheet_collection {
+            sheet.defined_names_crate_mut().retain(|d| !Self::is_name(d, name, scope));
+        }
+        self.all_defined_names().len() != before
+    }
+
     /// Has `ThreadedComments`.
     #[inline]
     #[must_use]
@@ -1466,4 +1672,68 @@ impl AdjustmentCoordinateWithSheet for Workbook {
             );
         }
     }
+}
+
+/// Whether Excel takes `name` as a defined name: 255 characters at most,
+/// beginning with a letter, `_` or `\\`, with no spaces nor characters of
+/// operators, not `R`, `C`, nor a cell reference (`A1`, `R1C1`).
+#[must_use]
+pub fn is_valid_defined_name(name: &str) -> bool {
+    let Some(first) = name.chars().next() else { return false };
+    if name.chars().count() > 255 || !(first.is_alphabetic() || first == '_' || first == '\\') {
+        return false;
+    }
+    if name.chars().any(|c| c.is_whitespace() || "!\"#$%&'()*+,-/:;<=>@[]^`{|}~".contains(c)) {
+        return false;
+    }
+    let upper = name.to_ascii_uppercase();
+    if upper == "R" || upper == "C" {
+        return false;
+    }
+    // A1 (up to XFD and row 1048576)
+    let letters: String = upper.chars().take_while(char::is_ascii_alphabetic).collect();
+    let rest = &upper[letters.len()..];
+    if (1..=3).contains(&letters.len()) && !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+        let col = column_index_from_string(&letters);
+        if col <= 16_384 && rest.parse::<u32>().is_ok_and(|r| (1..=1_048_576).contains(&r)) {
+            return false;
+        }
+    }
+    // R1C1, R1, C1
+    let r1c1 = |s: &str| {
+        let s = s.strip_prefix('R').map_or(s, |r| r.trim_start_matches(|c: char| c.is_ascii_digit()));
+        let s = s.strip_prefix('C').map_or(s, |c| c.trim_start_matches(|c: char| c.is_ascii_digit()));
+        s.is_empty()
+    };
+    if (upper.starts_with('R') || upper.starts_with('C')) && r1c1(&upper) {
+        return false;
+    }
+    true
+}
+
+/// A formula with the references to the sheet `sheet` made `#REF!` (as
+/// Excel does when it removes the sheet): `Sheet2!$A$1` -> `#REF!$A$1`.
+fn ref_error(formula: &str, sheet: &str) -> String {
+    let quoted = format!("'{}'!", sheet.replace('\'', "''"));
+    let plain = format!("{sheet}!");
+    let mut out = String::with_capacity(formula.len());
+    let mut rest = formula;
+    let mut in_text = false;
+    while let Some(c) = rest.chars().next() {
+        if c == '"' {
+            in_text = !in_text;
+        }
+        let boundary = out.chars().last().is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '.' || c == '\''));
+        if !in_text && boundary {
+            let at = [&quoted, &plain].into_iter().find(|p| rest.get(..p.len()).is_some_and(|r| r.eq_ignore_ascii_case(p)));
+            if let Some(prefix) = at {
+                out.push_str("#REF!");
+                rest = &rest[prefix.len()..];
+                continue;
+            }
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }

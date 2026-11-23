@@ -14,10 +14,13 @@
 //! - [`chart`]: the automatic colours of a chart's series and the data of a
 //!   series as the chart part holds it.
 //! - [`package`]: the relationships between the parts.
+//! - [`controls`]: the form controls and ActiveX controls of a sheet, what
+//!   they show and the cells they are linked to.
 
 pub mod anchor;
 pub mod chart;
 pub mod color;
+pub mod controls;
 pub mod geometry;
 pub mod package;
 

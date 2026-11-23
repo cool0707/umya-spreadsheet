@@ -442,6 +442,27 @@ impl ClientData {
     }
 
     #[inline]
+    /// Without where it is (the anchor, the row and column of a comment).
+    pub(crate) fn clear_position(&mut self) {
+        self.anchor = Anchor::default();
+        self.comment_row_target = None;
+        self.comment_column_target = None;
+    }
+
+    /// Where it is, as written: (`x:Anchor`, `x:Row`, `x:Column`).
+    pub(crate) fn position_xml(&self) -> (String, Option<String>, Option<String>) {
+        fn xml(f: impl FnOnce(&mut Writer<Cursor<Vec<u8>>>)) -> String {
+            let mut writer = Writer::new(Cursor::new(Vec::new()));
+            f(&mut writer);
+            String::from_utf8(writer.into_inner().into_inner()).unwrap_or_default()
+        }
+        (
+            xml(|w| self.anchor.write_to(w)),
+            self.comment_row_target.as_ref().map(|v| xml(|w| v.write_to(w))),
+            self.comment_column_target.as_ref().map(|v| xml(|w| v.write_to(w))),
+        )
+    }
+
     pub(crate) fn write_to(&self, writer: &mut Writer<Cursor<Vec<u8>>>) {
         // x:ClientData
         write_start_tag(

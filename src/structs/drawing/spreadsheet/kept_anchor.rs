@@ -21,7 +21,10 @@ use crate::structs::{
     Chart,
     WriterManager,
     XlsxError,
-    drawing::spreadsheet::TwoCellAnchor,
+    drawing::spreadsheet::{
+        OneCellAnchor,
+        TwoCellAnchor,
+    },
     kept_parts::{
         KeptPart,
         PartStore,
@@ -50,6 +53,12 @@ fn placeholder(n: usize) -> String {
     format!("\u{1}{n}\u{1}")
 }
 
+/// An anchor of a shape read into the model.
+pub(crate) enum ShapeAnchor {
+    Two(TwoCellAnchor),
+    One(OneCellAnchor),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct KeptAnchor {
     /// The element as it was read, declaring the namespaces it uses, with
@@ -66,6 +75,13 @@ struct KeptAnchorRelationship {
     target:   String,
     external: bool,
     part:     Option<KeptPart>,
+    /// A picture the model writes (the anchor is read into the model as
+    /// well): the name of its file (`image1.png`).
+    model_image: Option<String>,
+    /// The id it is written with, when it is not one of the anchor's XML but
+    /// of a part it refers to: the drawing of a `SmartArt` diagram, which its
+    /// data names (`dsp:dataModelExt/@relId`).
+    fixed_id: Option<String>,
 }
 
 /// The relationships of a drawing, as read: id -> (type, target, external,
@@ -101,18 +117,48 @@ fn drawing_relationships(rels: Option<&RawRelationships>) -> DrawingRelationship
         .collect()
 }
 
-/// Takes the anchors that hold charts out of a drawing (`xl/drawings/
-/// drawing1.xml`): returns the drawing without them, for the rest to be read
-/// into the model, and the anchors. `None` when there is no chart in it.
-pub(crate) fn take_charts(
+/// The anchors taken out of a drawing: those that hold charts, and those
+/// that hold shapes (`xdr:sp`, `xdr:grpSp`, `xdr:cxnSp`).
+pub(crate) struct TakenAnchors {
+    pub(crate) charts: Vec<KeptAnchor>,
+    pub(crate) shapes: Vec<KeptAnchor>,
+}
+
+/// What a child of the root of a drawing holds.
+#[derive(Default)]
+struct ChildKind {
+    chart: bool,
+    /// An anchor (two cells, one cell, absolute) with a shape or a picture
+    /// in it.
+    shape: bool,
+    /// A frame, a form control (`a14:compatExt`) or a part of ink: left to
+    /// the model.
+    other: bool,
+}
+
+impl ChildKind {
+    fn kept_shape(&self) -> bool {
+        self.shape && !self.other && !self.chart
+    }
+}
+
+/// Takes the anchors that hold charts and shapes out of a drawing
+/// (`xl/drawings/drawing1.xml`): returns the drawing without them, for the
+/// rest to be read into the model, and the anchors. `None` when there is
+/// none of them in it. An anchor that refers to a part the file does not
+/// have is left to the model.
+pub(crate) fn take_anchors(
     data: &[u8],
     rels: Option<&RawRelationships>,
     store: &PartStore,
-) -> Option<(Vec<u8>, Vec<KeptAnchor>)> {
-    if !CHART_URIS
+) -> Option<(Vec<u8>, TakenAnchors)> {
+    let has_chart = CHART_URIS
         .iter()
-        .any(|uri| data.windows(uri.len()).any(|w| w == *uri))
-    {
+        .any(|uri| data.windows(uri.len()).any(|w| w == *uri));
+    let has_shape = [b"sp>".as_slice(), b"sp ", b"grpSp>", b"cxnSp>", b"cxnSp ", b"pic>", b"pic "]
+        .iter()
+        .any(|tag| data.windows(tag.len()).any(|w| w == *tag));
+    if !has_chart && !has_shape {
         return None;
     }
     let relationships = drawing_relationships(rels);
@@ -121,12 +167,14 @@ pub(crate) fn take_charts(
     let mut depth = 0usize;
     // The namespaces declared on the root: (attribute, value).
     let mut root_namespaces: Vec<(String, String)> = Vec::new();
-    // The child of the root being read: where it starts, whether it holds a
-    // chart, the attributes that refer to relationships.
+    // The child of the root being read: where it starts, what it holds, the
+    // attributes that refer to relationships.
     let mut child_start = 0u64;
-    let mut has_chart = false;
+    let mut kind = ChildKind::default();
     let mut rel_attributes: Vec<(String, String)> = Vec::new();
-    let mut taken: Vec<(usize, usize, KeptAnchor)> = Vec::new();
+    let mut child_is_anchor = false;
+    // (start, end, anchor, is a chart).
+    let mut taken: Vec<(usize, usize, KeptAnchor, bool)> = Vec::new();
 
     loop {
         let before = reader.buffer_position();
@@ -136,6 +184,7 @@ pub(crate) fn take_charts(
             Ok(event) => event,
             Err(_) => return None,
         };
+        let mut child_end = false;
         match &event {
             Event::Start(e) | Event::Empty(e) => {
                 let empty = matches!(event, Event::Empty(_));
@@ -149,17 +198,26 @@ pub(crate) fn take_charts(
                         }
                     }
                 } else {
+                    let local = e.local_name().into_inner();
                     if depth == 1 {
                         child_start = before;
-                        has_chart = false;
+                        kind = ChildKind::default();
                         rel_attributes.clear();
+                        child_is_anchor =
+                            matches!(local, b"twoCellAnchor" | b"oneCellAnchor" | b"absoluteAnchor");
                     }
-                    if e.local_name().into_inner() == b"graphicData" {
+                    if depth == 2 && child_is_anchor && matches!(local, b"sp" | b"grpSp" | b"cxnSp" | b"pic") {
+                        kind.shape = true;
+                    }
+                    if matches!(local, b"graphicFrame" | b"compatExt" | b"contentPart") {
+                        kind.other = true;
+                    }
+                    if local == b"graphicData" {
                         if let Some(uri) =
                             e.attributes().flatten().find(|a| a.key.as_ref() == b"uri")
                         {
                             if CHART_URIS.contains(&uri.value.as_ref()) {
-                                has_chart = true;
+                                kind.chart = true;
                             }
                         }
                     }
@@ -178,44 +236,32 @@ pub(crate) fn take_charts(
                 }
                 if !empty {
                     depth += 1;
-                } else if depth == 1 && has_chart {
-                    let end = reader.buffer_position();
-                    // (One that refers to a part the file does not have is
-                    // left to the model.)
-                    if let Some(anchor) = KeptAnchor::new(
-                        &data[usize::try_from(child_start).ok()?..usize::try_from(end).ok()?],
-                        &root_namespaces,
-                        &rel_attributes,
-                        &relationships,
-                        store,
-                    ) {
-                        taken.push((
-                            usize::try_from(child_start).ok()?,
-                            usize::try_from(end).ok()?,
-                            anchor,
-                        ));
-                    }
+                } else if depth == 1 {
+                    child_end = true;
                 }
             }
             Event::End(_) => {
                 depth = depth.saturating_sub(1);
-                if depth == 1 && has_chart {
-                    let end = reader.buffer_position();
-                    let start = usize::try_from(child_start).ok()?;
-                    let end = usize::try_from(end).ok()?;
-                    if let Some(anchor) = KeptAnchor::new(
-                        &data[start..end],
-                        &root_namespaces,
-                        &rel_attributes,
-                        &relationships,
-                        store,
-                    ) {
-                        taken.push((start, end, anchor));
-                    }
-                    has_chart = false;
+                if depth == 1 {
+                    child_end = true;
                 }
             }
             _ => {}
+        }
+        if child_end && (kind.chart || kind.kept_shape()) {
+            let start = usize::try_from(child_start).ok()?;
+            let end = usize::try_from(reader.buffer_position()).ok()?;
+            if let Some(anchor) = KeptAnchor::new(
+                &data[start..end],
+                &root_namespaces,
+                &rel_attributes,
+                &relationships,
+                store,
+                !kind.chart,
+            ) {
+                taken.push((start, end, anchor, kind.chart));
+            }
+            kind = ChildKind::default();
         }
     }
     if taken.is_empty() {
@@ -223,14 +269,76 @@ pub(crate) fn take_charts(
     }
     let mut rest = Vec::with_capacity(data.len());
     let mut at = 0;
-    let mut anchors = Vec::with_capacity(taken.len());
-    for (start, end, anchor) in taken {
+    let mut anchors = TakenAnchors { charts: Vec::new(), shapes: Vec::new() };
+    for (start, end, anchor, chart) in taken {
         rest.extend_from_slice(&data[at..start]);
         at = end;
-        anchors.push(anchor);
+        if chart {
+            anchors.charts.push(anchor);
+        } else {
+            anchors.shapes.push(anchor);
+        }
     }
     rest.extend_from_slice(&data[at..]);
     Some((rest, anchors))
+}
+
+/// An anchor of a shape as it was read, and what the model of the anchor
+/// was like then. While the model stays so, the anchor is written as it was
+/// read (the model leaves out some of a shape: named colors, the settings of
+/// the levels of the paragraphs, what Excel 2010 hides for compatibility...).
+/// Prints nothing in `Debug`, for the model's `Debug` to tell whether it
+/// was changed.
+#[derive(Clone, Default)]
+pub(crate) struct KeptShape(Option<Box<(KeptAnchor, u64)>>);
+
+impl std::fmt::Debug for KeptShape {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+impl KeptShape {
+    /// What a model is like (`Debug` of it, which leaves this out).
+    pub(crate) fn hash_of<T: std::fmt::Debug>(model: &T) -> u64 {
+        use std::{
+            fmt::Write,
+            hash::Hasher,
+        };
+        struct HashWriter(std::collections::hash_map::DefaultHasher);
+        impl Write for HashWriter {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0.write(s.as_bytes());
+                Ok(())
+            }
+        }
+        let mut writer = HashWriter(std::collections::hash_map::DefaultHasher::new());
+        let _ = write!(writer, "{model:?}");
+        writer.0.finish()
+    }
+
+    pub(crate) fn set(&mut self, kept: KeptAnchor, hash: u64) {
+        self.0 = Some(Box::new((kept, hash)));
+    }
+
+    /// The anchor as it was read, while the model (whose hash is `hash`) is
+    /// what it was then.
+    pub(crate) fn unchanged(&self, hash: u64) -> Option<&KeptAnchor> {
+        let kept = self.0.as_deref()?;
+        (kept.1 == hash).then_some(&kept.0)
+    }
+
+    pub(crate) fn kept_mut(&mut self) -> Option<&mut KeptAnchor> {
+        self.0.as_deref_mut().map(|k| &mut k.0)
+    }
+
+    /// After the model and what was kept were changed alike: still written
+    /// as kept when it was before.
+    pub(crate) fn rehash(&mut self, was_unchanged: bool, hash: u64) {
+        if let (true, Some(k)) = (was_unchanged, self.0.as_deref_mut()) {
+            k.1 = hash;
+        }
+    }
 }
 
 impl KeptAnchor {
@@ -240,6 +348,7 @@ impl KeptAnchor {
         rel_attributes: &[(String, String)],
         relationships: &DrawingRelationships,
         store: &PartStore,
+        model_images: bool,
     ) -> Option<Self> {
         let mut xml = std::str::from_utf8(raw).ok()?.to_string();
 
@@ -271,10 +380,17 @@ impl KeptAnchor {
             } else {
                 let (_, rel_type, target, external, path) =
                     relationships.iter().find(|r| &r.0 == id)?;
+                let mut model_image = None;
                 let part = if *external {
                     None
+                } else if let Some(part) = store.part(path) {
+                    Some(part)
+                } else if model_images && rel_type.ends_with("/image") {
+                    // Written by the model, which reads the picture too.
+                    model_image = Some(path.rsplit('/').next().unwrap_or(path).to_string());
+                    None
                 } else {
-                    Some(store.part(path)?)
+                    return None;
                 };
                 list.push(KeptAnchorRelationship {
                     id: id.clone(),
@@ -282,6 +398,8 @@ impl KeptAnchor {
                     target: target.clone(),
                     external: *external,
                     part,
+                    model_image,
+                    fixed_id: None,
                 });
                 ids.push(id);
                 ids.len() - 1
@@ -293,10 +411,45 @@ impl KeptAnchor {
                 );
             }
         }
+        // The drawing of a SmartArt diagram: its data names it by the id of
+        // the relationship of the drawing, which it is written with.
+        let mut drawings = Vec::new();
+        for r in &mut list {
+            if !r.rel_type.ends_with("/diagramData") {
+                continue;
+            }
+            let Some(part) = &mut r.part else { continue };
+            let text = part.text();
+            let Some(i) = text.find(" relId=\"") else { continue };
+            let rest = &text[i + " relId=\"".len()..];
+            let id = rest[..rest.find('"').unwrap_or(0)].to_string();
+            let Some((_, rel_type, target, false, path)) = relationships.iter().find(|r| r.0 == id) else {
+                continue;
+            };
+            let Some(drawing) = store.part(path) else { continue };
+            let fixed = if id.starts_with("rIdDgm") { id.clone() } else { format!("rIdDgm{}", id.trim_start_matches("rId")) };
+            part.replace_text(&format!(" relId=\"{id}\""), &format!(" relId=\"{fixed}\""));
+            drawings.push(KeptAnchorRelationship {
+                id,
+                rel_type: rel_type.clone(),
+                target: target.clone(),
+                external: false,
+                part: Some(drawing),
+                model_image: None,
+                fixed_id: Some(fixed),
+            });
+        }
+        list.extend(drawings);
         Some(KeptAnchor {
             xml,
             relationships: list,
         })
+    }
+
+    /// For each relationship, the id it is written with when it has one of
+    /// its own.
+    pub(crate) fn fixed_ids(&self) -> impl Iterator<Item = Option<&str>> {
+        self.relationships.iter().map(|r| r.fixed_id.as_deref())
     }
 
     /// The chart as the model of this crate has it, for an anchor of two
@@ -340,6 +493,52 @@ impl KeptAnchor {
         Ok(chart)
     }
 
+    /// The anchor of a shape as the model of this crate has it (keeping
+    /// this anchor for writing while the model is not changed). `Err` for
+    /// one the model does not read (an absolute anchor, other prefixes),
+    /// which is only kept.
+    pub(crate) fn into_model_shape(self, rels: Option<&RawRelationships>) -> Result<ShapeAnchor, Self> {
+        let mut xml = self.xml.clone();
+        for (n, r) in self.relationships.iter().enumerate() {
+            xml = xml.replace(&placeholder(n), &r.id);
+        }
+        let mut reader = Reader::from_str(&xml);
+        reader.config_mut().trim_text(true);
+        let start = match reader.read_event() {
+            Ok(Event::Start(e)) => e.into_owned(),
+            _ => return Err(self),
+        };
+        let prefix = start.name().prefix().map(|p| p.into_inner().to_vec());
+        if !matches!(prefix.as_deref(), None | Some(b"xdr")) {
+            return Err(self);
+        }
+        let local = start.local_name().into_inner().to_vec();
+        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match local.as_slice() {
+            b"twoCellAnchor" => {
+                let mut anchor = TwoCellAnchor::default();
+                anchor.set_attributes(&mut reader, &start, rels);
+                Some(ShapeAnchor::Two(anchor))
+            }
+            b"oneCellAnchor" => {
+                let mut anchor = OneCellAnchor::default();
+                anchor.set_attributes(&mut reader, &start, rels);
+                Some(ShapeAnchor::One(anchor))
+            }
+            _ => None,
+        }));
+        match read {
+            Ok(Some(ShapeAnchor::Two(mut anchor))) => {
+                anchor.set_kept(self);
+                Ok(ShapeAnchor::Two(anchor))
+            }
+            Ok(Some(ShapeAnchor::One(mut anchor))) => {
+                anchor.set_kept(self);
+                Ok(ShapeAnchor::One(anchor))
+            }
+            _ => Err(self),
+        }
+    }
+
     /// Writes the parts of the chart; returns, for each relationship of the
     /// anchor, (type, target, external) to write in the relationships of
     /// the drawing.
@@ -349,6 +548,7 @@ impl KeptAnchor {
     ) -> Result<Vec<(String, String, bool)>, XlsxError> {
         let mut list = Vec::with_capacity(self.relationships.len());
         for r in &self.relationships {
+            // (A picture of the model is written with it: this is not used.)
             let target = match &r.part {
                 Some(part) => format!("/{}", part.write(writer_mng)?),
                 None => r.target.clone(),
@@ -356,6 +556,12 @@ impl KeptAnchor {
             list.push((r.rel_type.clone(), target, r.external));
         }
         Ok(list)
+    }
+
+    /// For each relationship, the name of the file of the picture the model
+    /// writes for it, when it is one.
+    pub(crate) fn model_images(&self) -> impl Iterator<Item = Option<&str>> {
+        self.relationships.iter().map(|r| r.model_image.as_deref())
     }
 
     /// Writes the anchor; `ids` are the ids its relationships are written

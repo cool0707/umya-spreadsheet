@@ -23,16 +23,19 @@
 
 | モジュール | 中身 | 使うところ |
 |---|---|---|
-| `xml_tree` | XML の木（`Node`。深さ 256 より下は捨てる）。読み方は 3 つ: `parse`（整形式だけ）、`parse_partial`（読めたところまで）、`parse_lenient`（終了タグを照合しない。VML 用） | xljs `src/xml.rs`（再エクスポート）、RAS `view/xml.rs` |
+| `xml_tree` | XML の木（`Node`。深さ 256 より下は捨てる）。読み方は 3 つ: `parse`（整形式だけ）、`parse_partial`（読めたところまで）、`parse_lenient`（終了タグを照合しない。終了タグのない `<br>` は改行として読む。VML 用） | xljs `src/xml.rs`（再エクスポート）、RAS `view/xml.rs` |
 | `drawingml::geometry` | 図形の形。ECMA-376 の既定の図形とワードアートの文字の変形の定義（`src/drawingml/presets.zip`）、ガイドの式、フリーフォームのパスを評価して SVG のパスにする | xljs の印刷、RAS の `ras book view` |
 | `drawingml::color` | テーマの色、色の変換（`lumMod` など）、塗り、スタイルの参照 | 同上 |
 | `drawingml::anchor` | アンカーとセルの位置、`xfrm` | 同上 |
 | `drawingml::chart` | グラフの自動の色（`colorsN.xml`）、系列の参照、キャッシュの値 | 同上 |
-| `drawingml::package` | 部品のパスの解決、リレーション、`Package` トレイト（`sheet_part`・テーマの色） | 同上 |
+| `drawingml::package` | 部品のパスの解決、リレーション、`Package` トレイト（`sheet_part`・テーマの色。部品のバイト列 `bytes`、シートの一部の要素 `sheet_element` はプログラムが持ち方に合わせて実装する） | 同上 |
+| `drawingml::controls` | シートのフォームコントロールと ActiveX コントロール（と埋め込みオブジェクト）を読む: 種類・名前・位置・文字とフォント・リンクするセル・リストの範囲・チェックの状態・値・マクロ。シートの `controls`、`ctrlProps`、VML、描画の中の写し（`Control::apply_mirror`）を突き合わせ、ActiveX は保存された中身（MS-OFORMS）から読む。読むだけ（書くのは読んだまま持つ部品） | RAS のブックの表示（`view/controls.rs` が描く） |
 | `vba` | `vbaProject.bin` の読み書き: CFB、MS-OVBA の圧縮と展開、`dir` ストリーム、モジュールのソースとコードページ、p-code なしの書き出し、プロジェクトの保護、VBA のストンピングの検出、ユーザーフォームのデザイナ ストレージ。`.xls` の `_VBA_PROJECT_CUR` も読める（`VbaProject::read_storage`） | xljs `src/vba`、RAS `crates/ras-ovba` |
 
 - 図形の定義の作り直し方は `tools/preset-shapes/make.py`。
-- 図形を HTML や SVG に描くところは、xljs と RAS でそれぞれに持つ。描く先が違う（xljs は印刷、RAS は画面）。
+- 図形やコントロールを HTML や SVG に描くところは、xljs と RAS でそれぞれに持つ。描く先が違う（xljs は印刷、RAS は画面）。
+- フォームコントロールと ActiveX コントロールはモデルに入れない。保存は読んだまま持つ部品で足り（4 つの部品の整合と ActiveX の中身を書くのは割に合わない）、
+  読むのは `drawingml::controls`。値などを書き換える要求が出たら、読んだまま持つ部品のその属性を書き換える API を足す。新しく作る要求が出るまでモデルにしない。
 - RAS の `crates/ras-ovba` には、バイトを保つ OPC パッケージの操作が残る。`pack` / `unpack`、シートの操作、`.xlsb` の読み取りなど。これらは変更のないパートを元のバイトのまま残すために、わざとこのクレートのモデルを通さない。
 
 ### 2.2 モデルから読めるもの
@@ -53,18 +56,29 @@
 | 図形を印刷するか・ロックするか、代替テキスト、画像やコネクタのマクロ | `ClientData`、`NonVisualDrawingProperties::description` / `title`、`Picture::set_macro` |
 | 「'」を付けて入力した文字列、ピボットのボタン | `Style::quote_prefix` / `pivot_button` |
 | VBA プロジェクトの署名 | `Workbook::has_vba_signature`。プロジェクトを置き換えると消える |
+| ふりがなの設定（種類・配置・フォント）: シートの既定と文字列ごと。ふりがなを表示するセル・行・列 | `Worksheet::phonetic_properties` / `set_phonetic_properties`、`CellValue::phonetic_properties` / `set_phonetic_properties` / `set_phonetic_runs`（`PhoneticProperties`・`PhoneticType`・`PhoneticAlignment`）、`Cell` / `Row` / `Column::set_show_phonetic` |
+| 書き込みのパスワードと読み取り専用の推奨（`fileSharing`） | `Workbook::file_sharing` / `file_sharing_mut`（`FileSharing::set_password`・`check_password`・`set_read_only_recommended`。パスワードは Excel 2013 以降と同じ SHA-512。Excel 2007 の `reservationPassword` も確かめられる） |
+| ファイルを書いたアプリケーションの版（`fileVersion`） | `Workbook::file_version` / `set_file_version`。新しいブックは Excel のもの（`FileVersion::excel`） |
+| エラーチェックを無視するセル（`ignoredErrors`） | `Worksheet::ignored_errors` / `ignored_errors_mut` / `add_ignored_error`（`IgnoredError`・`IgnoredErrorKind`）。行・列の挿入と削除で範囲が動き、すべて消えたものは消す |
+| シートを開いたときに全部を計算し直すか（`sheetCalcPr`） | `Worksheet::full_calc_on_load` / `set_full_calc_on_load` |
+| 名前の定義: スコープ（ブックかシート）を指定した追加・検索・削除、すべての名前とスコープ、コメント・マクロを名前として登録したもの（`function`・`vbProcedure`・`xlm`・関数の分類・ショートカットキー・説明など） | `Workbook::add_defined_name` / `defined_name` / `defined_name_mut` / `remove_defined_name` / `all_defined_names`、`DefinedName::comment` / `set_comment` / `function` / `set_function` などと `attribute` / `set_attribute`、名前に使えるかは `is_valid_defined_name`。モデルはシートを指す名前をスコープによらずそのシートに持つので、スコープは `localSheetId` で決まる |
 
 ## 3. 保存で落ちないようにしたもの
 
-仕組みは 3 つ:
+仕組みは 4 つ:
 
 1. **モデルに足す**: 読み書きする値として持つ。
 2. **読んだまま持つ**: 中身を見ずに読んだ XML や部品のまま持ち、保存で書き戻す。
-   - 部品: `kept_parts.rs` の `KeptRelationships`。
+   - 部品: `kept_parts.rs` の `KeptRelationships`（ブック・シート・テーブル・パッケージのリレーションごと）。
    - 描画のアンカー: `KeptAnchor`。
    - 要素や属性: `other_attributes` と、要素を読んだまま持つもの。
-3. **本家の修正を取り込む**。
-
+3. **読んだまま持ち、モデルも読む**: モデルにも読み、モデルが読んだときのままなら読んだものを、モデルで変えたらモデルから書く。
+   モデルの `Debug` の表現のハッシュで比べ、読んだものは `Debug` に出さない。
+   - グラフ（`Chart::kept_unchanged`）、図形と画像のアンカー（`TwoCellAnchor` / `OneCellAnchor::kept_unchanged`。`KeptShape`）、
+     テーマ（`Theme::kept_unchanged`）、メモの枠（VML の `Shape::kept_unchanged`。位置はハッシュから除き、書くときにモデルの位置に置き換える）。
+   - 行・列の挿入と削除では、モデルと読んだものの両方を動かし、変えていない扱いのままにする。
+   - 画像のアンカーの画像の部品はモデルが書く（同じ部品を 2 つ持たない）。
+4. **本家の修正を取り込む**。
 ### 3.1 部品や描画ごと落ちていたもの（読んだまま持つ）
 
 - グラフ（chartEx も）、ピボットテーブルとキャッシュ、外部リンク、スライサー、タイムライン、フォームコントロールのプロパティ、カスタム XML
@@ -72,6 +86,11 @@
 - SmartArt（`xl/diagrams`）
 - VBA プロジェクトの署名（`vbaProjectSignature*.bin`）
 - 色のパレット（`styles.xml` の `colors`）、ブックのテーブルスタイル
+- 外部データの接続（`xl/connections.xml`）とクエリ（`xl/queryTables`。テーブルとシートから）、データモデル（Power Pivot）
+- パッケージが参照する部品（`_rels/.rels`）: 秘密度ラベル（`docMetadata/LabelInfo.xml`）、リボンのカスタマイズ（`customUI`）、作業ウィンドウのアドインなど。
+  ブックとそのプロパティ・サムネイル・デジタル署名（書いた中身と合わない）は除く
+- SmartArt の描画のキャッシュ（`xl/diagrams/drawing*.xml`）。データの `dsp:dataModelExt` の `relId` が指すので、描画のリレーションをその id（`rIdDgm…`）で書く
+- ほかのアプリの文書の埋め込み（Word・PowerPoint・マクロ付きブック）。以前は `.xlsx` と `.bin` しか書かず、`oleObject` の `r:id` が画像を指していた
 
 ### 3.2 一部が落ちていたもの
 
@@ -93,7 +112,7 @@
   - オートフィルターのボタンを隠した列
   - フィルターの日付のグループ・色・アイコン
   - 行と列のグループ
-  - ふりがな（セルの `rPh`、シートと文字列の `phoneticPr` の種類）
+  - ふりがな（セルの `rPh`、シートと文字列の `phoneticPr`、行の `ph`・列の `phonetic`）
 - **ブック**: シート見出し・スクロールバーの表示、シートの名前の変更に付いてくる参照
 - **入力規則**: 2 つの数式の条件、停止・注意・情報の種類、IME の設定。メッセージを文字参照（`&#25968;`）で書いたものが二重にエスケープされていた
 - **描画**:
@@ -102,29 +121,40 @@
   - 印刷しない図形、代替テキスト
   - 線の始点の矢印、図形の文字の下線・上付き
   - 反射などの効果、画像とコネクタのマクロ
-- **コメント**: スレッド形式のコメントの作者・返信・解決済み
+  - 図形・画像のモデルにないもの（色の名前 `a:prstClr`、文字の段落の 2〜9 段目 `a:lvl2pPr`〜、Excel 2010 の互換用の隠した塗り・線・効果
+    `a14:hiddenFill` など、グラデーション）。アンカーを読んだまま書く（3 の仕組み）。フォームコントロールの図形（`a14:compatExt`）はモデルから書く
+- **コメント**: スレッド形式のコメントの作者・返信・解決済み。メモの枠の書式（塗り・線の矢印・文字の配置）と、Excel のテキストボックス以外の形の定義（`v:shapetype`）
+- **テーマ**: 新しく描く図形の既定のスタイル（`objectDefaults`）、グラデーションの形（`fillToRect`・`path`）、拡張。読んだまま書く（3 の仕組み）
+- **ブック（`workbook.xml`）**: `fileVersion`・書き込みのパスワードと読み取り専用の推奨（`fileSharing`。どちらも 2.2 のとおりモデルから設定できる）、`workbookPr` の属性（`showObjects`・`backupFile`・`codeName` など）、
+  ユーザー設定のビュー（`customWorkbookViews`）、`oleSize`、スマートタグ、Web 公開、`fileRecoveryPr`
+- **シート**: 計算の設定（`sheetCalcPr`。モデル）、範囲の編集の許可（`protectedRanges`）、シナリオ、並べ替え（`sortState`）、統合（`dataConsolidate`）、
+  ユーザー設定のビュー（`customSheetViews`。ビューごとのプリンターの設定も）、エラーチェックを無視するセル（`ignoredErrors`。モデル）、スマートタグ、
+  ユーザー設定のプロパティ（`customProperties`）、ウォッチ、ヘッダー・フッターの画像（`legacyDrawingHF` とその VML）、背景の画像（`picture`）、Web 公開、`sheetPr` の属性と `outlinePr`（グループの集計行の位置）、
+  マクロのないブックのシートの `codeName`
+- **保護のパスワード**: シート・ブック・変更履歴の保護のパスワードのハッシュが Excel と違い、このクレートで設定したパスワードを Excel が受け付けなかった
+  （SHA-512 を繰り返す各回で、前の回のハッシュではなく全部を 1 つのハッシュに足していた）。Excel が書いた `sheet_lock.xlsx` のハッシュで確かめる
+- **名前の定義**: `function`・`vbProcedure`・`comment` などの属性（マクロを名前として登録したもの）。`DefinedName::set_address` が前の参照を消さずに足していた
+  （範囲でない数式は最後の部分だけが残った）。シートを削除すると、後ろのシートの名前の `localSheetId` がずれて別のシートの名前になり、ブックの名前のうち
+  そのシートに持っていたものが消えていた。Excel と同じく、削除したシートの名前は消し、ほかの名前はそのシートへの参照を `#REF!` にする
+- **ハイパーリンク**: `display`
 - **行・列の挿入と削除、シートのコピー**: Excel と同じように参照を付け替える（`Workbook::edit_lines` / `copy_sheet`）
 
 詳しい中身と理由は xljs の `docs/design/pdf-design.md` 7 章（フォークで直したもの）と `docs/design/save-fidelity.md` にある。
 
 ## 4. まだ足りないもの（保存で落ちるもの）
 
-2026-11-22 に、xljs・RAS・このクレートのテスト用のブック 107 冊を開いて保存し、部品と要素と属性を比べた結果。比べ方は 5 章。
+2026-11-22 に、xljs・RAS・このクレートのテスト用のブック 107 冊を開いて保存し、部品と要素と属性を比べた結果（2026-11-23 に直したものを除いた）。比べ方は 5 章。
 優先度は、起きやすさと、気づかずに業務のブックを壊す度合いで付けた。
 
 | 優先 | 落ちるもの | 中身 |
 |---|---|---|
-| 中 | 外部データの接続とクエリ | `xl/connections.xml`、`xl/queryTables`、テーブルからクエリへのリレーション。Power Query などで取り込んだテーブルの更新の設定が消える |
-| 中 | 秘密度ラベル | `docMetadata/LabelInfo.xml`（Microsoft Purview のラベル）。ラベルが外れる |
-| 中 | 描画のモデルにないもの | 色の名前（`a:prstClr`）、文字の段落の 2〜9 段目の設定（`a:lvl2pPr`〜）、Excel 2010 の互換用の隠した塗り・線・効果（`a14:hiddenFill` など）、図形の一部のグラデーション。図形全体を読んだまま持つ仕組み（グラフの `KeptAnchor` と同じもの）にすれば一度に直る |
 | 低 | フォームコントロールの VML | `vmlDrawing*.vml`、シートの `legacyDrawing`、描画の `a14:compatExt`。Excel 2010 以降はシートの `controls`・`ctrlProps`・描画から読むので元どおり動く。Excel 2007 以前と LibreOffice では見えない |
-| 低 | メモ（コメント）の枠の VML | 枠はこのクレートが作り直すので、枠の塗り（グラデーション）などの書式が既定に戻る |
-| 低 | テーマの一部 | テーマはモデルから作り直す。新しく描く図形の既定のスタイル（`objectDefaults`）、グラデーションの形（`fillToRect`・`path`）、テーマの拡張が落ちる |
-| 低 | ユーザー設定のビュー | `customWorkbookViews`、シートの `customSheetViews` |
-| 低 | 名前の定義の `function` / `vbProcedure` | マクロを名前として登録したもの（XLM の関数） |
-| 低 | SmartArt の描画のキャッシュ | `diagramDrawing`（`dsp:dataModelExt` の `relId`）。データ・レイアウト・スタイル・色は残るので、Excel が作り直すはず（実機では確かめていない） |
-| 低 | そのほか | ピボットキャッシュの外部の参照元、ユーザー設定のプロパティ（一部のブック）、`printerSettings`（一部のブック）、`showObjects`、`fileRecoveryPr`、`hyperlink` の `display` |
 | — | `.xlsb` | 読めない。RAS の `crates/ras-ovba` が VBA の部分だけを読む |
+
+読んだまま持つシートの要素は、行・列の挿入と削除で範囲とセルが動く（`KeptRelationships::shift_elements`。`edit_lines` でも `insert_new_row` などでも）:
+範囲の編集の許可・ウォッチ・スマートタグ（範囲がすべて消えたら要素ごと消す）、並べ替え、シナリオ、
+ユーザー設定のビューのウィンドウ枠・選択範囲・改ページ（消えた行・列の改ページは消し、数を数え直す）・フィルター（範囲と、列の番号 `colId`。
+消えた列のフィルターは消す）。統合（`dataConsolidate`）の参照元はほかのシートのことが多いので動かさない。
 
 ### 4.1 落ちても害のないもの
 
@@ -136,13 +166,19 @@
 - 接頭辞の違い（`x:sheet`→`sheet`、`wsDr`→`xdr:wsDr`）、部品の名前の番号（`theme.xml`→`theme1.xml`）。
 - インライン文字列（`<is>`）が共有文字列になること。
 - 共同編集の ID（`xr:uid`、`a16:creationId`）、コメントの `shapeId`。
+- 中身のないユーザー設定のプロパティ（`docProps/custom.xml`）、`date1904="false"`。
+- Id も Target もないリレーション（Google スプレッドシートがピボットキャッシュに書く `externalLinkPath`）。
+- どこからも参照されない部品（参照のない埋め込み・テーマの `theme.xml` の名前の違いなど）。
 
 ## 5. 調べ方
 
-- 部品・要素・属性の比較は、xljs の `tools/excel-verify/partdiff.py`（`py -I partdiff.py 元.xlsx 保存後.xlsx`）。手元のブックをまとめて調べるなら、このクレートで開いて保存する小さなプログラム（`reader::xlsx::read` → `writer::xlsx::write`）で書き出してから、1 冊ずつ比べる。
+- 部品・要素・属性の比較は、xljs の `tools/excel-verify/partdiff.py`（`py -I partdiff.py 元.xlsx 保存後.xlsx`）。手元のブックをまとめて調べるなら、`examples/roundtrip.rs` で開いて保存してから（`cargo run --release --example roundtrip -- 元1.xlsx 保存後1.xlsx 元2.xlsx 保存後2.xlsx ...`）、1 冊ずつ比べる。
 - Excel で開けるか、Excel から見て同じかは、Windows の実機の Excel で xljs の `tools/excel-verify/features.ps1` などを使う（xljs の `docs/design/excel-verify.md`）。
 - 直したものには、元に戻ったら分かるテストを付ける:
   - `tests/excel_compat.rs`: Excel で開けるか、描画。
   - `tests/excel_features.rs`: Excel が作ったブックの機能、ActiveX、SmartArt。
   - `tests/format_fidelity.rs`: モデルから読めるもの、属性。
   - `tests/vba_project.rs`: VBA と署名。
+  - `tests/defined_names.rs`: 名前の定義の編集。
+  - `tests/workbook_settings.rs`: ふりがな・`fileVersion`・`fileSharing`・`ignoredErrors`・`sheetCalcPr` の設定。
+  - `tests/kept_as_read.rs`: 読んだまま持つもの（接続とクエリ、パッケージの部品、ユーザー設定のビューとシート・ブックの要素、ヘッダー・フッターの画像、図形・画像・テーマ・メモの枠、埋め込み）。

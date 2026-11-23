@@ -229,6 +229,13 @@ impl OleObject {
         &*self.object_extension == "xlsx"
     }
 
+    /// Whether the object is a package (a workbook, a document of Word, a
+    /// presentation...) rather than an OLE object (`.bin`).
+    #[inline]
+    pub(crate) fn is_package(&self) -> bool {
+        !self.is_bin() && !self.object_extension.is_empty()
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,

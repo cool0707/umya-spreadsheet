@@ -215,6 +215,27 @@ pub(crate) fn write<W: io::Seek + io::Write>(
 
         write_end_tag(&mut writer, "v:shapetype");
 
+        // The other types of shapes the frames written as read are of.
+        let mut written = vec!["_x0000_t202".to_string()];
+        for comment in worksheet.comments() {
+            let Some(id) = comment.shape().kept_type().and_then(|t| t.strip_prefix('#')) else {
+                continue;
+            };
+            if written.iter().any(|w| w == id) {
+                continue;
+            }
+            let key = format!("id=\"{id}\"");
+            if let Some(xml) = worksheet
+                .kept_relationships()
+                .xml("v:shapetype")
+                .into_iter()
+                .find(|xml| xml[..xml.find('>').unwrap_or(0)].contains(&key))
+            {
+                crate::writer::driver::write_text_node_no_escape(&mut writer, xml);
+                written.push(id.to_string());
+            }
+        }
+
         for comment in worksheet.comments() {
             // v:shape
             comment.shape().write_to(&mut writer, id, &mut rel_list);

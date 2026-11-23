@@ -195,10 +195,25 @@ fn build(r: &mut Reader<&[u8]>, top: Node, strict: bool) -> Option<Node> {
     let mut stack = vec![top];
     // Elements open below MAX_DEPTH, left out.
     let mut skipped = 0usize;
+    // Read leniently (ends not matched against starts): `<br>` is a line
+    // break of HTML without an end (VML's text boxes), read as `<br/>`; the
+    // ends of those that have one are left out.
+    let lenient = !r.config().check_end_names;
+    let mut breaks = 0usize;
     let mut buf = Vec::new();
     loop {
         let ev = r.read_event_into(&mut buf);
         match ev {
+            Ok(Event::Start(ref e)) if lenient && e.local_name().as_ref().eq_ignore_ascii_case(b"br") => {
+                if skipped == 0 && stack.len() < MAX_DEPTH {
+                    let n = element(e);
+                    stack.last_mut()?.children.push(n);
+                }
+                breaks += 1;
+            }
+            Ok(Event::End(ref e)) if breaks > 0 && e.local_name().as_ref().eq_ignore_ascii_case(b"br") => {
+                breaks -= 1;
+            }
             Ok(Event::Start(ref e)) => {
                 if skipped > 0 || stack.len() >= MAX_DEPTH {
                     skipped += 1;
@@ -334,10 +349,18 @@ mod tests {
         let p = parse_partial(xml).unwrap();
         assert!(p.child("q").is_none());
         let l = parse_lenient(xml).unwrap();
-        let br = l.path(&["p", "br"]).unwrap();
-        assert_eq!(br.text, "y");
-        // </a> closed p: q went into it.
+        // `<br>` without an end is a line break.
+        assert!(l.path(&["p", "br"]).unwrap().text.is_empty());
+        assert_eq!(l.child("p").unwrap().all_text(), "xy");
+        assert!(l.child("q").is_some());
+        // Another element without an end: each end closes the innermost one.
+        let l = parse_lenient(b"<a><p>x<b>y</p><q/></a>").unwrap();
+        assert_eq!(l.path(&["p", "b"]).unwrap().text, "y");
         assert!(l.path(&["p", "q"]).is_some());
+        // A `<br></br>` stays one.
+        let l = parse_lenient(b"<a><p>x<br></br>y</p><q/></a>").unwrap();
+        assert_eq!(l.child("p").unwrap().children.len(), 1);
+        assert!(l.child("q").is_some());
     }
 
     #[test]

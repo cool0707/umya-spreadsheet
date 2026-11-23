@@ -10,7 +10,9 @@ use crate::{
         Worksheet,
         drawing::spreadsheet::{
             WorksheetDrawing,
-            take_charts,
+            ShapeAnchor,
+            TakenAnchors,
+            take_anchors,
         },
         raw::{
             RawFile,
@@ -26,13 +28,14 @@ pub(crate) fn read(
     chart_parts: &PartStore,
 ) {
     // The anchors that hold charts are kept as they were read, with the
-    // parts of the charts; the rest is read into the model.
+    // parts of the charts, and so are those of shapes; the rest is read into
+    // the model.
     let (data, kept) =
-        match take_charts(drawing_file.file_data(), drawing_relationships, chart_parts) {
+        match take_anchors(drawing_file.file_data(), drawing_relationships, chart_parts) {
             Some((data, kept)) => (std::borrow::Cow::Owned(data), kept),
             None => (
                 std::borrow::Cow::Borrowed(drawing_file.file_data()),
-                Vec::new(),
+                TakenAnchors { charts: Vec::new(), shapes: Vec::new() },
             ),
         };
     let data = std::io::Cursor::new(data.as_ref());
@@ -57,7 +60,7 @@ pub(crate) fn read(
     );
     // Charts of the kinds the model knows are read into it as well (and
     // written as they were read while they are not changed).
-    for anchor in kept {
+    for anchor in kept.charts {
         match anchor.into_model_chart(drawing_relationships) {
             Ok(chart) => {
                 worksheet
@@ -70,6 +73,43 @@ pub(crate) fn read(
                     .kept_anchor_collection_mut()
                     .push(anchor);
             }
+        }
+    }
+    // Shapes are read into the model as well, and written as they were read
+    // while they are not changed.
+    let drawing = worksheet.worksheet_drawing_mut();
+    for anchor in kept.shapes {
+        let model_images = anchor.model_images().any(|i| i.is_some());
+        match anchor.into_model_shape(drawing_relationships) {
+            Ok(ShapeAnchor::Two(mut anchor)) => {
+                if anchor.is_image() {
+                    let mut image = crate::structs::Image::default();
+                    image.set_two_cell_anchor(anchor);
+                    drawing.add_image(image);
+                } else {
+                    if model_images {
+                        // Its pictures are the model's only in pictures.
+                        anchor.forget_kept();
+                    }
+                    drawing.add_two_cell_anchor_collection(anchor);
+                }
+            }
+            Ok(ShapeAnchor::One(mut anchor)) => {
+                if anchor.is_image() {
+                    let mut image = crate::structs::Image::default();
+                    image.set_one_cell_anchor(anchor);
+                    drawing.add_image(image);
+                } else {
+                    if model_images {
+                        anchor.forget_kept();
+                    }
+                    drawing.add_one_cell_anchor_collection(anchor);
+                }
+            }
+            // (One with pictures the model would write is dropped, as the
+            // model drops it.)
+            Err(anchor) if !model_images => drawing.kept_anchor_collection_mut().push(anchor),
+            Err(_) => {}
         }
     }
 }

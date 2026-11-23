@@ -213,6 +213,9 @@ impl Columns {
         if column.collapsed.value() {
             attributes.push(("collapsed", "1").into());
         }
+        if column.phonetic.value() {
+            attributes.push(("phonetic", "1").into());
+        }
         attributes.push(("customWidth", "1").into());
         let xf_index_str: String;
         let xf_index = stylesheet.set_style(column.style());

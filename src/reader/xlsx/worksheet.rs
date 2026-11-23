@@ -78,6 +78,37 @@ pub(crate) fn read(
     )
 }
 
+/// The elements of a sheet the model has nothing for, kept as read and
+/// written back in their place (`write_kept` of the writer): the ranges
+/// users may edit, scenarios, the sort, the consolidation, custom views,
+/// smart tags, custom properties, watches, the pictures of the headers and
+/// footers, the background picture, publishing to the web.
+pub(crate) const KEPT_ELEMENTS: [&[u8]; 11] = [
+    b"protectedRanges",
+    b"scenarios",
+    b"sortState",
+    b"dataConsolidate",
+    b"customSheetViews",
+    b"smartTags",
+    b"customProperties",
+    b"cellWatches",
+    b"legacyDrawingHF",
+    b"picture",
+    b"webPublishItems",
+];
+
+fn read_sheet_pr(worksheet: &mut Worksheet, e: &quick_xml::events::BytesStart<'_>) {
+    for attr in e.attributes().with_checks(false).flatten() {
+        let key = attr.key.into_inner();
+        let value = crate::reader::driver::unescaped_attribute_value(&attr);
+        if key == b"codeName" {
+            worksheet.set_code_name(value);
+        } else if !key.contains(&b':') && !key.starts_with(b"xmlns") {
+            worksheet.add_sheet_pr_attribute(&String::from_utf8_lossy(key), &value);
+        }
+    }
+}
+
 fn read_from_reader<R: io::BufRead>(
     worksheet: &mut Worksheet,
     data: R,
@@ -94,14 +125,7 @@ fn read_from_reader<R: io::BufRead>(
         reader,
         Event::Start(ref e) => match e.name().into_inner() {
             b"sheetPr" => {
-                for a in e.attributes().with_checks(false) {
-                    match a {
-                        Ok(ref attr) if attr.key.0 == b"codeName" => {
-                            worksheet.set_code_name(get_attribute_value(attr)?);
-                        }
-                        Ok(_) | Err(_) => {}
-                    }
-                }
+                read_sheet_pr(worksheet, e);
             }
             b"sheetViews" => {
                 worksheet
@@ -163,6 +187,11 @@ fn read_from_reader<R: io::BufRead>(
                 let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
                 worksheet.kept_relationships_mut().add_xml("controls", xml);
             }
+            name if KEPT_ELEMENTS.contains(&name) => {
+                let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
+                let name = String::from_utf8_lossy(name).to_string();
+                worksheet.kept_relationships_mut().add_xml(&name, xml);
+            }
             // An extension of the sheet the model does not read (sparklines,
             // slicers, timelines...): kept as read. Those of conditional
             // formats and data validations are read below.
@@ -220,19 +249,18 @@ fn read_from_reader<R: io::BufRead>(
         },
         Event::Empty(ref e) => match e.name().into_inner() {
             b"sheetPr" => {
-                for a in e.attributes().with_checks(false) {
-                    match a {
-                        Ok(ref attr) if attr.key.0 == b"codeName" => {
-                            worksheet.set_code_name(get_attribute_value(attr)?);
-                        }
-                        Ok(_) | Err(_) => {}
-                    }
-                }
+                read_sheet_pr(worksheet, e);
             }
             b"tabColor" => {
                 worksheet
                     .tab_color_mut()
                     .set_attributes(&mut reader, e, true);
+            }
+            // Where the summary rows and columns of the groups are, and how
+            // the outline is styled: kept as read.
+            b"outlinePr" => {
+                let xml = crate::reader::driver::read_raw_element(&mut reader, e, true);
+                worksheet.kept_relationships_mut().add_xml("outlinePr", xml);
             }
             b"pageSetUpPr" => {
                 if let Some(v) = get_attribute(e, b"fitToPage") {
@@ -288,11 +316,21 @@ fn read_from_reader<R: io::BufRead>(
             b"headerFooter" => {
                 worksheet.header_footer_mut().set_options(e);
             }
-            // How the furigana of the sheet are written (type, alignment):
-            // kept as read.
-            b"phoneticPr" => {
+            name if KEPT_ELEMENTS.contains(&name) => {
                 let xml = crate::reader::driver::read_raw_element(&mut reader, e, true);
-                worksheet.kept_relationships_mut().add_xml("phoneticPr", xml);
+                let name = String::from_utf8_lossy(name).to_string();
+                worksheet.kept_relationships_mut().add_xml(&name, xml);
+            }
+            // How the furigana of the sheet are shown.
+            b"phoneticPr" => {
+                worksheet.set_phonetic_properties(Some(crate::structs::PhoneticProperties::read(e)));
+            }
+            b"sheetCalcPr" => {
+                let full = get_attribute(e, b"fullCalcOnLoad").map(|v| v == "1" || v == "true");
+                worksheet.set_full_calc_on_load(Some(full.unwrap_or(false)));
+            }
+            b"ignoredError" => {
+                worksheet.add_ignored_error(crate::structs::IgnoredError::read(e));
             }
             b"printOptions" => {
                 worksheet
@@ -522,6 +560,9 @@ fn get_hyperlink(
         .map(|v| escape::unescape(&v).map(|v| v.to_string()).unwrap_or(v));
     if let Some(v) = get_attribute(e, b"tooltip") {
         hyperlink.set_tooltip(escape::unescape(&v).unwrap().to_string());
+    }
+    if let Some(v) = get_attribute(e, b"display") {
+        hyperlink.set_display(escape::unescape(&v).map(|v| v.to_string()).unwrap_or(v));
     }
     // A dangling r:id (no relationship, or no relationships part at all)
     // leaves the hyperlink without a URL instead of aborting the read.

@@ -40,6 +40,49 @@ use base64::{
 };
 use utils::generate_random_bytes;
 
+/// A password hashed as Excel hashes the passwords of protections and of
+/// the password to modify (SHA-512 with a random salt): (algorithm, hash,
+/// salt, spin count), the hash and the salt in base64.
+#[allow(clippy::cast_possible_truncation)]
+pub(crate) fn hash_password(password: &str) -> (String, String, String, u32) {
+    generate_random_bytes!(salt, 16);
+    let key = key::convert_password_to_hash(password, &salt, constants::KEY_SPIN_COUNT);
+    (
+        constants::KEY_HASH_ALGORITHM.to_string(),
+        STANDARD.encode(key),
+        STANDARD.encode(salt),
+        constants::KEY_SPIN_COUNT as u32,
+    )
+}
+
+/// Whether `password` is the one hashed (SHA-512; the other algorithms are
+/// not checked).
+pub(crate) fn check_password(password: &str, algorithm: &str, hash: &str, salt: &str, spin_count: u32) -> bool {
+    if !algorithm.eq_ignore_ascii_case(constants::KEY_HASH_ALGORITHM) {
+        return false;
+    }
+    let (Ok(hash), Ok(salt)) = (STANDARD.decode(hash), STANDARD.decode(salt)) else {
+        return false;
+    };
+    key::convert_password_to_hash(password, &salt, spin_count as usize) == hash
+}
+
+/// A password hashed as Excel 2007 and earlier do (16 bits: the `password`
+/// of a protection, the `reservationPassword` of the password to modify).
+#[must_use]
+pub fn legacy_password_hash(password: &str) -> u16 {
+    let bytes: Vec<u16> = password.encode_utf16().collect();
+    let mut hash: u32 = 0;
+    for (i, c) in bytes.iter().enumerate() {
+        let value = u32::from(*c & 0xff) << (i + 1);
+        let rotated = value >> 15;
+        hash ^= (value & 0x7fff) | rotated;
+    }
+    hash ^= u32::try_from(bytes.len()).unwrap_or(0);
+    hash ^= 0xCE4B;
+    u16::try_from(hash & 0xffff).unwrap_or(0)
+}
+
 /// Encrypts the sheet protection using the provided password.
 ///
 /// Updates the `sheet_protection` object with the algorithm name, salt value,
@@ -540,5 +583,61 @@ mod tests {
                  d8e9aeebad0c08065e0db20cdc8e4552744b61ad1b3cf9a3c5aad5b2a047e76b"
             )
         );
+    }
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_hash() {
+        // As openpyxl and the specification's example have it.
+        assert_eq!(format!("{:04X}", legacy_password_hash("secret")), "DAA7");
+    }
+
+    #[test]
+    fn hashed_passwords_are_checked() {
+        let (algorithm, hash, salt, spin) = hash_password("書き込み用");
+        assert_eq!((algorithm.as_str(), spin), ("SHA-512", 100_000));
+        assert!(check_password("書き込み用", &algorithm, &hash, &salt, spin));
+        assert!(!check_password("違う", &algorithm, &hash, &salt, spin));
+    }
+
+    /// Hn = H(Hn-1 + iterator), as Excel and Apache POI (`iteratorFirst`
+    /// false) compute it: the steps are hashes of hashes.
+    #[test]
+    fn the_spins_hash_the_hash_before() {
+        use sha2::{
+            Digest,
+            Sha512,
+        };
+        let salt = [7u8; 16];
+        let password: Vec<u8> = "pw".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let mut h = Sha512::new();
+        h.update(salt);
+        h.update(&password);
+        let mut hash = h.finalize().to_vec();
+        for i in 0..3u32 {
+            let mut h = Sha512::new();
+            h.update(&hash);
+            h.update(i.to_le_bytes());
+            hash = h.finalize().to_vec();
+        }
+        assert_eq!(key::convert_password_to_hash("pw", &salt, 3), hash);
+    }
+}
+
+#[cfg(test)]
+mod excel_hashes {
+    /// The sheet protection Excel wrote in `tests/test_files/sheet_lock.xlsx`
+    /// with the password "password": the hash this crate computes is the
+    /// same (the steps used to be fed to one hash, and Excel did not take the
+    /// passwords this crate set).
+    #[test]
+    fn a_password_excel_hashed() {
+        let (hash, salt) = ("oEel/MXQ7ogqdYEfdCMWm3A47Xs66hnxE2RA70nta8PLtoFSlDr3yldy42MGdjw26yKVjCTQ8sdLdCWEQRdSVw==", "N8DvRKm4um4fiNmvLew+bg==");
+        assert!(super::check_password("password", "SHA-512", hash, salt, 100_000));
+        assert!(!super::check_password("Password", "SHA-512", hash, salt, 100_000));
     }
 }

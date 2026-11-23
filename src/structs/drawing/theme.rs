@@ -48,9 +48,38 @@ use crate::{
 pub struct Theme {
     name:           StringValue,
     theme_elements: ThemeElements,
+    /// The part as it was read, written while the model is not changed (the
+    /// model leaves out the default styles of new shapes, the shapes of the
+    /// gradients, the extensions...).
+    kept:           KeptTheme,
+}
+
+/// The part of a theme as it was read, and what the model was like then.
+/// Prints nothing in `Debug`, for the model's `Debug` to tell whether it was
+/// changed.
+#[derive(Clone, Default)]
+struct KeptTheme(Option<Box<(Vec<u8>, u64)>>);
+
+impl std::fmt::Debug for KeptTheme {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
 }
 
 impl Theme {
+    /// Keeps the part as it was read, for writing while the model is not
+    /// changed.
+    pub(crate) fn set_kept(&mut self, data: Vec<u8>) {
+        let hash = crate::structs::drawing::spreadsheet::KeptShape::hash_of(self);
+        self.kept = KeptTheme(Some(Box::new((data, hash))));
+    }
+
+    /// The part as it was read, while the model has not been changed.
+    pub(crate) fn kept_unchanged(&self) -> Option<&[u8]> {
+        let kept = self.kept.0.as_deref()?;
+        (kept.1 == crate::structs::drawing::spreadsheet::KeptShape::hash_of(self)).then_some(kept.0.as_slice())
+    }
+
     #[inline]
     #[must_use]
     pub fn name(&self) -> &str {

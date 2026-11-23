@@ -33,6 +33,9 @@ pub struct DefinedName {
     string_value:   StringValue,
     local_sheet_id: UInt32Value,
     hidden:         BooleanValue,
+    /// The other attributes (`comment`, `function`, `vbProcedure`...), as
+    /// read or set (the accessors below), written back as they are.
+    other_attributes: Vec<(Box<str>, Box<str>)>,
 }
 impl DefinedName {
     #[inline]
@@ -72,14 +75,21 @@ impl DefinedName {
         self.address()
     }
 
+    /// What the name refers to: areas (`Sheet1!$A$1:$B$5`, several separated
+    /// by commas) or any formula or constant. Takes the place of what it
+    /// referred to (it was added to it).
     pub fn set_address<S: Into<String>>(&mut self, value: S) -> &mut Self {
-        let list = Self::split_str(value);
-        for v in &list {
-            if is_address(v) {
+        let value = value.into();
+        self.address.clear();
+        self.string_value.remove_value();
+        let list = Self::split_str(value.as_str());
+        // A reference to a sheet removed (`#REF!$A$1`) is not an area.
+        if !list.is_empty() && list.iter().all(|v| is_address(v) && !v.starts_with('#')) {
+            for v in &list {
                 self.add_address(v);
-            } else {
-                self.set_string_value(v);
             }
+        } else {
+            self.set_string_value(value);
         }
         self
     }
@@ -149,6 +159,171 @@ impl DefinedName {
     #[inline]
     pub fn set_hidden(&mut self, value: bool) {
         self.hidden.set_value(value);
+    }
+
+    /// Makes the name the workbook's (no sheet of its own).
+    #[inline]
+    pub fn remove_local_sheet_id(&mut self) -> &mut Self {
+        self.local_sheet_id.remove_value();
+        self
+    }
+
+    /// An attribute of the name as the file has it (`comment`, `function`...);
+    /// None when it has none.
+    #[must_use]
+    pub fn attribute(&self, name: &str) -> Option<&str> {
+        self.other_attributes.iter().find(|(k, _)| &**k == name).map(|(_, v)| &**v)
+    }
+
+    /// Sets (`Some`) or removes (`None`) an attribute of the name other than
+    /// `name`, `localSheetId` and `hidden`.
+    pub fn set_attribute(&mut self, name: &str, value: Option<&str>) -> &mut Self {
+        match self.other_attributes.iter_mut().find(|(k, _)| &**k == name) {
+            Some(entry) => match value {
+                Some(v) => entry.1 = v.into(),
+                None => self.other_attributes.retain(|(k, _)| &**k != name),
+            },
+            None => {
+                if let Some(v) = value {
+                    self.other_attributes.push((name.into(), v.into()));
+                }
+            }
+        }
+        self
+    }
+
+    fn flag(&self, name: &str) -> bool {
+        matches!(self.attribute(name), Some("1" | "true"))
+    }
+
+    fn set_flag(&mut self, name: &str, value: bool) -> &mut Self {
+        self.set_attribute(name, value.then_some("1"))
+    }
+
+    /// The comment of the name (Excel's Name Manager).
+    #[must_use]
+    pub fn comment(&self) -> Option<&str> {
+        self.attribute("comment")
+    }
+
+    pub fn set_comment(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("comment", value.filter(|v| !v.is_empty()))
+    }
+
+    /// Whether the name is of a function or command (a macro of Excel 4.0
+    /// or VBA registered as a name: `function`).
+    #[must_use]
+    pub fn function(&self) -> bool {
+        self.flag("function")
+    }
+
+    pub fn set_function(&mut self, value: bool) -> &mut Self {
+        self.set_flag("function", value)
+    }
+
+    /// Whether the function or command is a procedure of VBA (`vbProcedure`).
+    #[must_use]
+    pub fn vb_procedure(&self) -> bool {
+        self.flag("vbProcedure")
+    }
+
+    pub fn set_vb_procedure(&mut self, value: bool) -> &mut Self {
+        self.set_flag("vbProcedure", value)
+    }
+
+    /// Whether the name is a macro of Excel 4.0 (XLM: `xlm`).
+    #[must_use]
+    pub fn xlm(&self) -> bool {
+        self.flag("xlm")
+    }
+
+    pub fn set_xlm(&mut self, value: bool) -> &mut Self {
+        self.set_flag("xlm", value)
+    }
+
+    /// The category of the function in Insert Function (`functionGroupId`:
+    /// 14 is "User Defined").
+    #[must_use]
+    pub fn function_group_id(&self) -> Option<u32> {
+        self.attribute("functionGroupId").and_then(|v| v.parse().ok())
+    }
+
+    pub fn set_function_group_id(&mut self, value: Option<u32>) -> &mut Self {
+        let value = value.map(|v| v.to_string());
+        self.set_attribute("functionGroupId", value.as_deref())
+    }
+
+    /// The keyboard shortcut of the command (`shortcutKey`: the letter of
+    /// Ctrl+letter).
+    #[must_use]
+    pub fn shortcut_key(&self) -> Option<&str> {
+        self.attribute("shortcutKey")
+    }
+
+    pub fn set_shortcut_key(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("shortcutKey", value)
+    }
+
+    /// The description of the function in Insert Function (`description`).
+    #[must_use]
+    pub fn description(&self) -> Option<&str> {
+        self.attribute("description")
+    }
+
+    pub fn set_description(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("description", value)
+    }
+
+    /// The help topic of the function (`help`).
+    #[must_use]
+    pub fn help(&self) -> Option<&str> {
+        self.attribute("help")
+    }
+
+    pub fn set_help(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("help", value)
+    }
+
+    /// The text of the status bar for the command (`statusBar`).
+    #[must_use]
+    pub fn status_bar(&self) -> Option<&str> {
+        self.attribute("statusBar")
+    }
+
+    pub fn set_status_bar(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("statusBar", value)
+    }
+
+    /// The text of the menu of the command (`customMenu`).
+    #[must_use]
+    pub fn custom_menu(&self) -> Option<&str> {
+        self.attribute("customMenu")
+    }
+
+    pub fn set_custom_menu(&mut self, value: Option<&str>) -> &mut Self {
+        self.set_attribute("customMenu", value)
+    }
+
+    /// Whether the name is published to a server with the workbook (Excel
+    /// Services: `publishToServer`).
+    #[must_use]
+    pub fn publish_to_server(&self) -> bool {
+        self.flag("publishToServer")
+    }
+
+    pub fn set_publish_to_server(&mut self, value: bool) -> &mut Self {
+        self.set_flag("publishToServer", value)
+    }
+
+    /// Whether the name is a parameter of the workbook on a server (Excel
+    /// Services: `workbookParameter`).
+    #[must_use]
+    pub fn workbook_parameter(&self) -> bool {
+        self.flag("workbookParameter")
+    }
+
+    pub fn set_workbook_parameter(&mut self, value: bool) -> &mut Self {
+        self.set_flag("workbookParameter", value)
     }
 
     fn split_str<S: Into<String>>(value: S) -> Vec<String> {
@@ -237,6 +412,14 @@ impl DefinedName {
         set_string_from_xml!(self, e, name, "name");
         set_string_from_xml!(self, e, local_sheet_id, "localSheetId");
         set_string_from_xml!(self, e, hidden, "hidden");
+        for a in e.attributes().with_checks(false).flatten() {
+            let key = a.key.into_inner();
+            if matches!(key, b"name" | b"localSheetId" | b"hidden") || key.contains(&b':') {
+                continue;
+            }
+            let value = crate::reader::driver::unescaped_attribute_value(&a);
+            self.other_attributes.push((String::from_utf8_lossy(key).into(), value.into()));
+        }
 
         let mut buf = Vec::new();
         let text = reader
@@ -255,6 +438,9 @@ impl DefinedName {
         let hidden_str = self.hidden.value_string();
         if self.hidden.has_value() {
             attributes.push(("hidden", hidden_str).into());
+        }
+        for (k, v) in &self.other_attributes {
+            attributes.push((&**k, &**v).into());
         }
         write_start_tag(writer, "definedName", attributes, false);
         write_text_node_conversion(writer, self.address());

@@ -57,6 +57,8 @@ pub struct TwoCellAnchor {
     picture:              Option<Box<Picture>>,
     is_alternate_content: BooleanValue,
     client_data:          ClientData,
+    /// The anchor as it was read, written while the model is not changed.
+    kept:                 super::KeptShape,
 }
 
 impl TwoCellAnchor {
@@ -344,6 +346,34 @@ impl TwoCellAnchor {
         &mut self.client_data
     }
 
+    /// Keeps the anchor as it was read, for writing while the model is not
+    /// changed.
+    pub(crate) fn set_kept(&mut self, kept: super::KeptAnchor) {
+        let hash = super::KeptShape::hash_of(self);
+        self.kept.set(kept, hash);
+    }
+
+    /// Writes the anchor from the model only.
+    pub(crate) fn forget_kept(&mut self) {
+        self.kept = super::KeptShape::default();
+    }
+
+    /// The anchor as it was read, while the model has not been changed.
+    pub(crate) fn kept_unchanged(&self) -> Option<&super::KeptAnchor> {
+        self.kept.unchanged(super::KeptShape::hash_of(self))
+    }
+
+    /// Moves the markers of the model, and of the anchor kept alike.
+    fn move_both(&mut self, shift: &crate::structs::kept_parts::Shift, model: impl FnOnce(&mut Self)) {
+        let unchanged = self.kept_unchanged().is_some();
+        model(self);
+        if let Some(k) = self.kept.kept_mut() {
+            k.move_position(shift);
+        }
+        let hash = super::KeptShape::hash_of(self);
+        self.kept.rehash(unchanged, hash);
+    }
+
     pub(crate) fn set_attributes<R: std::io::BufRead>(
         &mut self,
         reader: &mut Reader<R>,
@@ -496,18 +526,27 @@ impl AdjustmentCoordinate for TwoCellAnchor {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.from_marker.adjustment_insert_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
-        );
-        self.to_marker.adjustment_insert_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
-        );
+        let shift = crate::structs::kept_parts::Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   false,
+        };
+        self.move_both(&shift, |this| {
+            this.from_marker.adjustment_insert_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+            this.to_marker.adjustment_insert_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        });
     }
 
     #[inline]
@@ -518,18 +557,27 @@ impl AdjustmentCoordinate for TwoCellAnchor {
         root_row_num: u32,
         offset_row_num: u32,
     ) {
-        self.from_marker.adjustment_remove_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
-        );
-        self.to_marker.adjustment_remove_coordinate(
-            root_col_num,
-            offset_col_num,
-            root_row_num,
-            offset_row_num,
-        );
+        let shift = crate::structs::kept_parts::Shift {
+            root_col: root_col_num,
+            col:      offset_col_num,
+            root_row: root_row_num,
+            row:      offset_row_num,
+            remove:   true,
+        };
+        self.move_both(&shift, |this| {
+            this.from_marker.adjustment_remove_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+            this.to_marker.adjustment_remove_coordinate(
+                root_col_num,
+                offset_col_num,
+                root_row_num,
+                offset_row_num,
+            );
+        });
     }
 
     #[inline]

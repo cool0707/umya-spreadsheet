@@ -7,6 +7,9 @@ pub struct Hyperlink {
     /// `location` Excel writes beside the `r:id` of a link to a sheet and
     /// cell of another workbook, or to an anchor of a web page).
     target_location: Box<str>,
+    /// The text the link shows (`display`). Excel shows the value of the
+    /// cell; it keeps this for what was typed when the link was made.
+    display: Box<str>,
 }
 impl Hyperlink {
     #[inline]
@@ -79,6 +82,19 @@ impl Hyperlink {
     #[inline]
     pub fn set_target_location<S: Into<String>>(&mut self, value: S) -> &mut Hyperlink {
         self.target_location = value.into().into_boxed_str();
+        self
+    }
+
+    /// The text of the link (`display`), as read.
+    #[inline]
+    #[must_use]
+    pub fn display(&self) -> &str {
+        &self.display
+    }
+
+    #[inline]
+    pub fn set_display<S: Into<String>>(&mut self, value: S) -> &mut Hyperlink {
+        self.display = value.into().into_boxed_str();
         self
     }
 }

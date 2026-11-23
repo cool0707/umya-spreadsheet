@@ -43,8 +43,23 @@ pub(crate) fn read<R: io::Read + io::Seek>(
                     wb.set_workbook_view(obj);
                 }
                 b"workbookPr" => {
-                    if let Some(v) = get_attribute(e, b"date1904") {
-                        wb.set_date1904(v == "1" || v == "true");
+                    for a in e.attributes().with_checks(false).flatten() {
+                        let key = a.key.into_inner();
+                        let v = crate::reader::driver::unescaped_attribute_value(&a);
+                        match key {
+                            b"date1904" => {
+                                wb.set_date1904(v == "1" || v == "true");
+                            }
+                            b"codeName" => {
+                                wb.set_code_name(v.clone());
+                            }
+                            b"filterPrivacy" => {}
+                            key if !key.contains(&b':') => {
+                                let key = String::from_utf8_lossy(key).to_string();
+                                wb.set_workbook_pr_attribute(&key, Some(&v));
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 b"workbookProtection" => {
@@ -73,6 +88,20 @@ pub(crate) fn read<R: io::Read + io::Seek>(
                 b"externalReferences" | b"extLst" | b"pivotCaches" if !is_empty => {
                     let name = String::from_utf8_lossy(e.name().into_inner()).to_string();
                     let xml = crate::reader::driver::read_raw_element(&mut reader, e, false);
+                    wb.kept_relationships_mut().add_xml(&name, xml);
+                }
+                // What the model has nothing for, kept as read: custom views, the size of the OLE object of the workbook, smart
+                // tags, publishing to the web, how the file was recovered.
+                b"fileVersion" => {
+                    wb.set_file_version(Some(crate::structs::FileVersion::read(e)));
+                }
+                b"fileSharing" => {
+                    wb.set_file_sharing(Some(crate::structs::FileSharing::read(e)));
+                }
+                b"functionGroups" | b"oleSize" | b"customWorkbookViews" | b"smartTagPr"
+                | b"smartTagTypes" | b"webPublishing" | b"fileRecoveryPr" | b"webPublishObjects" => {
+                    let name = String::from_utf8_lossy(e.name().into_inner()).to_string();
+                    let xml = crate::reader::driver::read_raw_element(&mut reader, e, is_empty);
                     wb.kept_relationships_mut().add_xml(&name, xml);
                 }
                 b"definedName" => {

@@ -105,8 +105,9 @@ fn a_picture_keeps_its_geometry() {
     let saved = write(&read(&file("drawing_picture.xlsx")));
     let xml = &parts(&saved)["xl/drawings/drawing1.xml"];
     assert!(!xml.contains(r#"prst="""#));
-    let pic = &xml[xml.find("<xdr:pic>").unwrap()..];
-    assert!(pic.contains(r#"<a:prstGeom prst="rect">"#));
+    // (Written as it was read, without prefixes, or from the model.)
+    let pic = &xml[xml.find("<xdr:pic>").or_else(|| xml.find("<pic>")).unwrap()..];
+    assert!(pic.contains(r#"<a:prstGeom prst="rect">"#) || pic.contains(r#"prst="rect"/>"#));
 }
 
 /// The numFmtId of the style of each cell of column A, by row.

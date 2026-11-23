@@ -329,13 +329,17 @@ impl WorksheetDrawing {
         &mut self.kept_anchor_collection
     }
 
-    /// The anchors written as they were read: of the charts not changed,
-    /// then of those the model does not have.
+    /// The anchors written as they were read, in the order `write_to`
+    /// writes them: of the charts not changed, of those the model does not
+    /// have, then of the shapes not changed.
     pub(crate) fn kept_anchors_to_write(&self) -> impl Iterator<Item = &KeptAnchor> {
         self.chart_collection
             .iter()
             .filter_map(Chart::kept_unchanged)
             .chain(&self.kept_anchor_collection)
+            .chain(self.image_collection.iter().filter_map(Image::kept_unchanged))
+            .chain(self.two_cell_anchor_collection.iter().filter_map(TwoCellAnchor::kept_unchanged))
+            .chain(self.one_cell_anchor_collection.iter().filter_map(OneCellAnchor::kept_unchanged))
     }
 
     /// The charts written from the model: those not read from a file, and
@@ -589,27 +593,63 @@ impl WorksheetDrawing {
             chart.two_cell_anchor().write_to(writer, rel_list, 0);
         }
         // The anchors kept as they were read, with ids of their own for
-        // their relationships.
+        // their relationships (in the order of `kept_anchors_to_write`).
         let mut kept_no = 0;
-        for (anchor, relationships) in self.kept_anchors_to_write().zip(kept_relationships) {
-            let mut ids = Vec::with_capacity(relationships.len());
-            for _ in relationships {
-                rel_list.push((KEPT.to_string(), kept_no.to_string()));
+        let mut kept_relationships = kept_relationships.iter();
+        let mut write_kept = |writer: &mut Writer<Cursor<Vec<u8>>>,
+                              rel_list: &mut Vec<(String, String)>,
+                              anchor: &KeptAnchor| {
+            let relationships = kept_relationships.next().map_or(0, Vec::len);
+            let mut ids = Vec::with_capacity(relationships);
+            for (image, fixed) in anchor.model_images().zip(anchor.fixed_ids()).take(relationships) {
+                match (image, fixed) {
+                    // A picture the model writes: the relationship it has.
+                    (Some(name), _) => {
+                        let mut media = crate::structs::MediaObject::default();
+                        media.set_image_name(name);
+                        ids.push(format!("rId{}", media.rid(rel_list)));
+                    }
+                    // One with an id of its own.
+                    (None, Some(id)) => {
+                        rel_list.push((format!("{KEPT}#{id}"), kept_no.to_string()));
+                        ids.push(id.to_string());
+                    }
+                    (None, None) => {
+                        rel_list.push((KEPT.to_string(), kept_no.to_string()));
+                        ids.push(format!("rId{}", rel_list.len()));
+                    }
+                }
                 kept_no += 1;
-                ids.push(format!("rId{}", rel_list.len()));
             }
             anchor.write_to(writer, &ids);
+        };
+        let kept_charts = self
+            .chart_collection
+            .iter()
+            .filter_map(Chart::kept_unchanged)
+            .chain(&self.kept_anchor_collection);
+        for anchor in kept_charts {
+            write_kept(writer, rel_list, anchor);
         }
         for image in &self.image_collection {
-            image.write_to(writer, rel_list);
+            match image.kept_unchanged() {
+                Some(anchor) => write_kept(writer, rel_list, anchor),
+                None => image.write_to(writer, rel_list),
+            }
         }
         for two_cell_anchor in &self.two_cell_anchor_collection {
-            two_cell_anchor.write_to(writer, rel_list, 0);
+            match two_cell_anchor.kept_unchanged() {
+                Some(anchor) => write_kept(writer, rel_list, anchor),
+                None => two_cell_anchor.write_to(writer, rel_list, 0),
+            }
         }
 
         // xdr:oneCellAnchor
         for one_cell_anchor in &self.one_cell_anchor_collection {
-            one_cell_anchor.write_to(writer, rel_list);
+            match one_cell_anchor.kept_unchanged() {
+                Some(anchor) => write_kept(writer, rel_list, anchor),
+                None => one_cell_anchor.write_to(writer, rel_list),
+            }
         }
 
         // mc:AlternateContent

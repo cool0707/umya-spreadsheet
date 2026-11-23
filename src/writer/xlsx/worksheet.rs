@@ -140,10 +140,16 @@ fn write_worksheet_properties(
             worksheet.name()
         };
         attributes.push(("codeName", code_name).into());
+    } else if let Some(code_name) = worksheet.code_name() {
+        attributes.push(("codeName", code_name).into());
+    }
+    for (k, v) in worksheet.sheet_pr_attributes() {
+        attributes.push((&**k, &**v).into());
     }
 
     let page_setup = worksheet.page_setup();
-    if worksheet.tab_color().is_none() && !page_setup.has_fit_to_page() {
+    let outline = worksheet.kept_relationships().xml("outlinePr");
+    if worksheet.tab_color().is_none() && !page_setup.has_fit_to_page() && outline.is_empty() {
         if !attributes.is_empty() {
             write_start_tag(writer, "sheetPr", attributes, true);
         }
@@ -153,6 +159,9 @@ fn write_worksheet_properties(
     write_start_tag(writer, "sheetPr", attributes, false);
     if let Some(v) = worksheet.tab_color() {
         v.write_to_tab_color(writer);
+    }
+    for xml in outline {
+        crate::writer::driver::write_text_node_no_escape(writer, xml);
     }
     if page_setup.has_fit_to_page() {
         write_start_tag(
@@ -292,19 +301,26 @@ fn write_worksheet_features(
     worksheet: &Worksheet,
     stylesheet: &mut Stylesheet,
 ) {
+    if let Some(full) = worksheet.full_calc_on_load() {
+        let value = if full { "1" } else { "0" };
+        write_start_tag(writer, "sheetCalcPr", vec![("fullCalcOnLoad", value).into()], true);
+    }
     if let Some(v) = worksheet.sheet_protection() {
         v.write_to(writer);
     }
+    write_kept(writer, worksheet, "protectedRanges");
+    write_kept(writer, worksheet, "scenarios");
 
     if let Some(v) = worksheet.auto_filter() {
         v.write_to(writer);
     }
+    write_kept(writer, worksheet, "sortState");
+    write_kept(writer, worksheet, "dataConsolidate");
+    write_kept(writer, worksheet, "customSheetViews");
 
     worksheet.merge_cells_crate().write_to(writer);
-    match worksheet.kept_relationships().xml("phoneticPr").first() {
-        Some(xml) => crate::writer::driver::write_text_node_no_escape(writer, xml),
-        None => write_start_tag(writer, "phoneticPr", vec![("fontId", "1").into()], true),
-    }
+    let phonetic = worksheet.phonetic_properties().copied().unwrap_or_default();
+    crate::writer::driver::write_text_node_no_escape(writer, phonetic.to_xml());
 
     for conditional_formatting in worksheet.conditional_formatting_collection() {
         conditional_formatting.write_to(writer, stylesheet.differential_formats_mut());
@@ -357,6 +373,13 @@ fn write_worksheet_extensions(writer: &mut InternalWriter, worksheet: &Worksheet
             crate::writer::driver::write_text_node_no_escape(writer, xml);
         }
         write_end_tag(writer, "extLst");
+    }
+}
+
+/// Writes the elements named `name` kept as they were read.
+fn write_kept(writer: &mut InternalWriter, worksheet: &Worksheet, name: &str) {
+    for xml in worksheet.kept_relationships().xml(name) {
+        crate::writer::driver::write_text_node_no_escape(writer, xml);
     }
 }
 
@@ -480,6 +503,9 @@ fn write_hyperlinks(writer: &mut InternalWriter, worksheet: &Worksheet) -> i32 {
             if !hyperlink.tooltip().is_empty() {
                 attributes.push(("tooltip", hyperlink.tooltip()).into());
             }
+            if !hyperlink.display().is_empty() {
+                attributes.push(("display", hyperlink.display()).into());
+            }
             write_start_tag(writer, "hyperlink", attributes, true);
         }
 
@@ -514,6 +540,10 @@ fn write_print_settings(writer: &mut InternalWriter, worksheet: &Worksheet, r_id
     worksheet.header_footer().write_to(writer);
     worksheet.row_breaks().write_to(writer);
     worksheet.column_breaks().write_to(writer);
+    write_kept(writer, worksheet, "customProperties");
+    write_kept(writer, worksheet, "cellWatches");
+    crate::structs::IgnoredError::write_list(worksheet.ignored_errors(), writer);
+    write_kept(writer, worksheet, "smartTags");
 
     r_id
 }
@@ -561,15 +591,16 @@ fn write_tables_and_objects(writer: &mut InternalWriter, worksheet: &Worksheet, 
     // In the order of the schema: oleObjects, controls, tableParts (the ids
     // as before: the tables first).
     let tables = if worksheet.has_table() { worksheet.tables().len() } else { 0 };
+    write_kept(writer, worksheet, "legacyDrawingHF");
+    write_kept(writer, worksheet, "picture");
     let ole_id = 1000 + 25;
     worksheet
         .ole_objects()
         .write_to(writer, num_traits::cast(r_id + i32::try_from(tables).unwrap()).unwrap(), ole_id);
 
     // controls (form controls, kept as read)
-    for xml in worksheet.kept_relationships().xml("controls") {
-        crate::writer::driver::write_text_node_no_escape(writer, xml);
-    }
+    write_kept(writer, worksheet, "controls");
+    write_kept(writer, worksheet, "webPublishItems");
 
     if worksheet.has_table() {
         let tables = worksheet.tables();
