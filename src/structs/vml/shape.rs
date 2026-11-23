@@ -58,6 +58,22 @@ pub struct Shape {
     client_data:     ClientData,
     optional_number: Int32Value,
     coordinate_size: StringValue,
+    /// The shape as it was read, written while the model is not changed but
+    /// for where it is (the model leaves out some of the frame of a comment:
+    /// gradients of its fill, arrows of its line, the alignment of its
+    /// text...).
+    kept:            KeptVml,
+}
+
+/// The XML of a shape as it was read, and what the model was like then
+/// (but for where it is). Prints nothing in `Debug`.
+#[derive(Clone, Default)]
+struct KeptVml(Option<Box<(String, u64)>>);
+
+impl std::fmt::Debug for KeptVml {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
 }
 
 impl Shape {
@@ -463,6 +479,55 @@ impl Shape {
         );
     }
 
+    /// What the model is like but for where the shape is.
+    fn content_hash(&self) -> u64 {
+        let mut shape = self.clone();
+        shape.client_data.clear_position();
+        crate::structs::drawing::spreadsheet::KeptShape::hash_of(&shape)
+    }
+
+    /// Keeps the shape as it was read (`xml`, `<v:shape ...>...</v:shape>`),
+    /// for writing while the model is not changed. Not one that refers to
+    /// other parts (pictures).
+    pub(crate) fn set_kept(&mut self, xml: &str) {
+        if xml.contains("relid") || xml.contains("r:id") || xml.contains("o:href") {
+            return;
+        }
+        let hash = self.content_hash();
+        self.kept = KeptVml(Some(Box::new((xml.to_string(), hash))));
+    }
+
+    /// The shape as it was read, while the model has not been changed but
+    /// for where it is.
+    pub(crate) fn kept_unchanged(&self) -> Option<&str> {
+        let kept = self.kept.0.as_deref()?;
+        (kept.1 == self.content_hash()).then_some(kept.0.as_str())
+    }
+
+    /// The type of the shape as it was read (`#_x0000_t202`), while it is
+    /// written as read.
+    pub(crate) fn kept_type(&self) -> Option<&str> {
+        self.kept_unchanged()?;
+        self.r_type.value()
+    }
+
+    /// The shape as it was read, with the id `id` and where the model has it.
+    fn kept_xml(&self, xml: &str, id: &str) -> String {
+        let mut xml = set_attribute(xml, "id", id);
+        if xml[..xml.find('>').unwrap_or(0)].contains("o:spid=") {
+            xml = set_attribute(&xml, "o:spid", id);
+        }
+        let (anchor, row, col) = self.client_data.position_xml();
+        xml = replace_element(&xml, "x:Anchor", &anchor);
+        if let Some(row) = row {
+            xml = replace_element(&xml, "x:Row", &row);
+        }
+        if let Some(col) = col {
+            xml = replace_element(&xml, "x:Column", &col);
+        }
+        xml
+    }
+
     pub(crate) fn write_to(
         &self,
         writer: &mut Writer<Cursor<Vec<u8>>>,
@@ -471,6 +536,10 @@ impl Shape {
     ) {
         // v:shape
         let id_str = format!("_x0000_s{id}");
+        if let Some(xml) = self.kept_unchanged() {
+            crate::writer::driver::write_text_node_no_escape(writer, self.kept_xml(xml, &id_str));
+            return;
+        }
         let mut attributes: crate::structs::AttrCollection = Vec::new();
         attributes.push(("id", &id_str).into());
         if self.r_type.has_value() {
@@ -542,6 +611,37 @@ impl Shape {
         write_end_tag(writer, "v:shape");
     }
 }
+/// The XML of an element with the value of an attribute of its start tag
+/// set (`id="_x0000_s1025"`).
+fn set_attribute(xml: &str, name: &str, value: &str) -> String {
+    let end = xml.find('>').unwrap_or(xml.len());
+    let tag = &xml[..end];
+    for quote in ['"', '\''] {
+        let key = format!(" {name}={quote}");
+        if let Some(i) = tag.find(&key) {
+            let start = i + key.len();
+            if let Some(len) = tag[start..].find(quote) {
+                return format!("{}{value}{}", &xml[..start], &xml[start + len..]);
+            }
+        }
+    }
+    let at = if tag.ends_with('/') { end - 1 } else { end };
+    format!("{} {name}=\"{value}\"{}", &xml[..at], &xml[at..])
+}
+
+/// The XML with the element `name` (`x:Anchor`, the first one) replaced by
+/// `new`.
+fn replace_element(xml: &str, name: &str, new: &str) -> String {
+    let Some(start) = xml.find(&format!("<{name}>")).or_else(|| xml.find(&format!("<{name} "))) else {
+        return xml.to_string();
+    };
+    let close = format!("</{name}>");
+    let Some(len) = xml[start..].find(&close) else {
+        return xml.to_string();
+    };
+    format!("{}{new}{}", &xml[..start], &xml[start + len + close.len()..])
+}
+
 impl AdjustmentCoordinate for Shape {
     fn adjustment_insert_coordinate(
         &mut self,
