@@ -406,3 +406,53 @@ fn the_frames_of_comments_are_written_as_they_were_read() {
     assert!(vml.contains("<x:Row>11</x:Row>"), "{vml}");
     assert!(!vml.contains("<x:Row>8</x:Row>"), "{vml}");
 }
+
+#[test]
+fn embedded_documents_of_other_applications() {
+    // The embedded workbook of the second sheet made a document of Word.
+    let source = file("aaa.xlsm");
+    let mut archive = zip::ZipArchive::new(Cursor::new(&source)).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default();
+    for i in 0..archive.len() {
+        let mut f = archive.by_index(i).unwrap();
+        let mut name = f.name().to_string();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        if name == "xl/embeddings/Microsoft_Excel_Worksheet.xlsx" {
+            name = "xl/embeddings/Microsoft_Word_Document.docx".into();
+            data = b"DOCX".to_vec();
+        } else if let Ok(text) = String::from_utf8(data.clone()) {
+            data = text
+                .replace("Microsoft_Excel_Worksheet.xlsx", "Microsoft_Word_Document.docx")
+                .replace(r#"progId="ワークシート""#, r#"progId="Word.Document.12""#)
+                .replace(
+                    r#"<Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>"#,
+                    r#"<Default Extension="docx" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>"#,
+                )
+                .into_bytes();
+        }
+        out.start_file(name, options).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    let source = out.finish().unwrap().into_inner();
+
+    let after = parts(&round_trip(&source));
+    let doc = after.keys().find(|k| k.starts_with("xl/embeddings/") && k.ends_with(".docx")).cloned();
+    let doc = doc.unwrap_or_else(|| panic!("{:?}", after.keys().collect::<Vec<_>>()));
+    assert_eq!(after[&doc], "DOCX");
+    assert!(after["[Content_Types].xml"].contains(&format!(
+        r#"PartName="/{doc}" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document""#
+    )));
+    let sheet = "xl/worksheets/sheet2.xml";
+    assert!(after[sheet].contains(r#"progId="Word.Document.12""#));
+    ids_resolve(&after, sheet, &["r:id"]);
+    let rels = &after[&rels_of(sheet)];
+    let name = doc.rsplit('/').next().unwrap();
+    // The object goes to the document, its picture to a picture.
+    let ole = &after[sheet][after[sheet].find("<oleObject ").unwrap()..];
+    let id = values(ole, "r:id")[0];
+    assert!(rels.contains(&format!(r#"Id="{id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/{name}""#)), "{rels}");
+    let picture = values(ole, "r:id")[1];
+    assert!(rels.contains(&format!(r#"Id="{picture}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image""#)), "{rels}");
+}

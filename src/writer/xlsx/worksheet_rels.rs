@@ -161,9 +161,8 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     let mut excel_no_list = excel_no_list.iter();
     let mut ole_object_no_list = ole_object_no_list.iter();
     for ole_object in worksheet.ole_objects().ole_object() {
-        if ole_object.is_xlsx() {
-            let excel_no = excel_no_list.next().unwrap();
-            let object_name = format!("Microsoft_Excel_Worksheet{excel_no}.xlsx");
+        if ole_object.is_package() {
+            let object_name = excel_no_list.next().unwrap();
             write_relationship(
                 &mut writer,
                 &r_id.to_string(),

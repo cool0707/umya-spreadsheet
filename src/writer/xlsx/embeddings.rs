@@ -21,7 +21,12 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         if ole_object.is_xlsx() {
             let writer = ole_object.object_data().unwrap();
             let file_no = writer_mng.add_file_at_excel(writer)?;
-            excel_no_list.push(file_no.to_string());
+            excel_no_list.push(format!("Microsoft_Excel_Worksheet{file_no}.xlsx"));
+        } else if ole_object.is_package() {
+            // A document of Word, a presentation, a workbook with macros...
+            let writer = ole_object.object_data().unwrap_or_default();
+            let name = writer_mng.add_file_at_package(writer, ole_object.object_extension())?;
+            excel_no_list.push(name);
         }
     }
 

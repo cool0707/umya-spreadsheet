@@ -299,6 +299,34 @@ impl<W: io::Seek + io::Write> WriterManager<W> {
         }
     }
 
+    /// Writes an embedded package other than a workbook (`.docx`, `.pptx`,
+    /// `.xlsm`...) under the next free name Excel would give it; returns the
+    /// name (`Microsoft_Word_Document1.docx`).
+    pub(crate) fn add_file_at_package(&mut self, data: &[u8], extension: &str) -> Result<String, XlsxError> {
+        let ext = extension.to_ascii_lowercase();
+        let (stem, content_type) = match ext.as_str() {
+            "docx" => ("Microsoft_Word_Document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            "docm" => ("Microsoft_Word_Macro-Enabled_Document", "application/vnd.ms-word.document.macroEnabled.12"),
+            "pptx" => ("Microsoft_PowerPoint_Presentation", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            "pptm" => ("Microsoft_PowerPoint_Macro-Enabled_Presentation", "application/vnd.ms-powerpoint.presentation.macroEnabled.12"),
+            "sldx" => ("Microsoft_PowerPoint_Slide", "application/vnd.openxmlformats-officedocument.presentationml.slide"),
+            "xlsm" => ("Microsoft_Excel_Macro-Enabled_Worksheet", "application/vnd.ms-excel.sheet.macroEnabled.12"),
+            "xlsb" => ("Microsoft_Excel_Binary_Worksheet", "application/vnd.ms-excel.sheet.binary.macroEnabled.main"),
+            _ => ("Package", "application/vnd.openxmlformats-officedocument.package"),
+        };
+        let mut index = 0;
+        loop {
+            index += 1;
+            let name = format!("{stem}{index}.{ext}");
+            let file_path = format!("{PKG_EMBEDDINGS}/{name}");
+            if !self.check_file_exist(&file_path) {
+                self.add_bin(&file_path, data)?;
+                self.add_content_type(&file_path, content_type);
+                return Ok(name);
+            }
+        }
+    }
+
     pub(crate) fn add_file_at_printer_settings(&mut self, writer: &[u8]) -> Result<i32, XlsxError> {
         let mut index = 0;
         loop {
