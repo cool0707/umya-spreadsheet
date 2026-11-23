@@ -138,7 +138,10 @@
 | 低 | フォームコントロールの VML | `vmlDrawing*.vml`、シートの `legacyDrawing`、描画の `a14:compatExt`。Excel 2010 以降はシートの `controls`・`ctrlProps`・描画から読むので元どおり動く。Excel 2007 以前と LibreOffice では見えない |
 | — | `.xlsb` | 読めない。RAS の `crates/ras-ovba` が VBA の部分だけを読む |
 
-読んだまま持つものは、行・列の挿入と削除で動かないものがある（ユーザー設定のビューのフィルターと選択範囲、`protectedRanges`・`ignoredErrors` の範囲）。
+読んだまま持つシートの要素は、行・列の挿入と削除で範囲とセルが動く（`KeptRelationships::shift_elements`。`edit_lines` でも `insert_new_row` などでも）:
+範囲の編集の許可・エラーチェックを無視するセル・ウォッチ・スマートタグ（範囲がすべて消えたら要素ごと消す）、並べ替え、シナリオ、
+ユーザー設定のビューのウィンドウ枠・選択範囲・改ページ（消えた行・列の改ページは消し、数を数え直す）・フィルター（範囲と、列の番号 `colId`。
+消えた列のフィルターは消す）。統合（`dataConsolidate`）の参照元はほかのシートのことが多いので動かさない。
 
 ### 4.1 落ちても害のないもの
 

@@ -520,6 +520,31 @@ impl KeptRelationships {
         }
     }
 
+    /// Moves the areas and cells of the elements of a sheet kept as read
+    /// (custom views, the ranges users may edit, the errors not to flag, the
+    /// sort, scenarios, watches, smart tags) for rows or columns inserted or
+    /// removed; takes away what goes with the cells removed, and an element
+    /// left with nothing in it.
+    pub(crate) fn shift_elements(&mut self, edit: &crate::helper::rewrite::LineEdit) {
+        const MOVED: [&str; 7] =
+            ["protectedRanges", "ignoredErrors", "customSheetViews", "sortState", "scenarios", "cellWatches", "smartTags"];
+        self.xml.retain_mut(|(name, xml)| {
+            if !MOVED.contains(&name.as_str()) {
+                return true;
+            }
+            let mut rw = crate::helper::rewrite::KeptAreaXml::new(edit);
+            if let Some(new) = crate::helper::rewrite::rewrite_xml(xml.as_bytes(), &mut rw) {
+                *xml = String::from_utf8(new).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+            }
+            if let Some(kept) = crate::helper::rewrite::remove_marked(xml) {
+                *xml = kept;
+            }
+            // (These hold one or more of their children.)
+            !matches!(name.as_str(), "protectedRanges" | "ignoredErrors" | "cellWatches" | "smartTags")
+                || has_child(xml)
+        });
+    }
+
     /// The areas of the pivot tables kept (the `ref` of their `location`).
     pub(crate) fn pivot_locations(&self) -> Vec<String> {
         let mut out = Vec::new();
@@ -640,6 +665,15 @@ pub(crate) fn is_sheet_kept_target(rel_type: &str) -> bool {
         rel_type.rsplit('/').next(),
         Some("image" | "printerSettings" | "customProperty" | "vmlDrawing")
     )
+}
+
+/// Whether an element (as XML) has an element in it.
+fn has_child(xml: &str) -> bool {
+    let Some(end) = xml.find('>') else { return false };
+    if xml[..end].ends_with('/') {
+        return false;
+    }
+    xml[end + 1..].trim_start().find('<').is_some_and(|i| !xml[end + 1..].trim_start()[i..].starts_with("</"))
 }
 
 /// The namespaces (`xmlns:xr9`...) a root element declares, but the default one.

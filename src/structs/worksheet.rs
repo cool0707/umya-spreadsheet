@@ -1678,6 +1678,20 @@ impl Worksheet {
         self.sheet_pr_attributes.push((name.into(), value.into()));
     }
 
+    /// Moves the elements kept as read for rows or columns inserted or
+    /// removed as `adjustment_*_coordinate` gives them.
+    fn shift_kept_elements(&mut self, root_col: u32, cols: u32, root_row: u32, rows: u32, insert: bool) {
+        use crate::helper::rewrite::LineEdit;
+        if cols != 0 && root_col != 0 {
+            let edit = if insert { LineEdit::insert_columns(root_col, cols) } else { LineEdit::remove_columns(root_col, cols) };
+            self.kept_relationships.shift_elements(&edit);
+        }
+        if rows != 0 && root_row != 0 {
+            let edit = if insert { LineEdit::insert_rows(root_row, rows) } else { LineEdit::remove_rows(root_row, rows) };
+            self.kept_relationships.shift_elements(&edit);
+        }
+    }
+
     /// Has Code Name.
     #[inline]
     #[must_use]
@@ -2886,6 +2900,7 @@ impl Worksheet {
         let title = self.title.to_string();
         let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
         self.kept_relationships.rewrite_xml(&mut rw);
+        self.kept_relationships.shift_elements(edit);
     }
 
     /// [`Self::shift_lines`] for an edit limited to a band (cells inserted
@@ -2998,6 +3013,7 @@ impl Worksheet {
         let title = self.title.to_string();
         let mut rw = crate::helper::rewrite::AreaXml { sheet: &title, edit, own: true };
         self.kept_relationships.rewrite_xml(&mut rw);
+        self.kept_relationships.shift_elements(edit);
     }
 
     /// Makes a copy of the sheet `old` (already given its own name) one of
@@ -3425,6 +3441,9 @@ impl AdjustmentCoordinate for Worksheet {
             return;
         }
 
+        // the elements kept as read
+        self.shift_kept_elements(root_col_num, offset_col_num, root_row_num, offset_row_num, true);
+
         // defined_names
         for defined_name in &mut self.defined_names {
             defined_name.adjustment_insert_coordinate_with_sheet(
@@ -3525,6 +3544,9 @@ impl AdjustmentCoordinate for Worksheet {
         if offset_col_num == 0 && offset_row_num == 0 {
             return;
         }
+
+        // the elements kept as read
+        self.shift_kept_elements(root_col_num, offset_col_num, root_row_num, offset_row_num, false);
 
         // defined_names
         let title = &self.title;

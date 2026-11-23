@@ -503,3 +503,127 @@ fn the_pictures_of_headers_and_footers() {
     // Not read as the frames of comments.
     assert!(!after.values().any(|v| v.contains("<x:ClientData")));
 }
+
+/// A workbook whose first sheet has the elements kept as read that hold
+/// areas: ranges users may edit, a sort, errors not to flag, watches, a
+/// custom view with a filter and page breaks.
+fn with_areas() -> Vec<u8> {
+    let mut book = umya_spreadsheet::new_file();
+    book.sheet_mut(0).unwrap().cell_mut("A1").set_value("1");
+    edit(
+        &write(&book),
+        |name, text| {
+            if name != "xl/worksheets/sheet1.xml" {
+                return text;
+            }
+            let text = text.replacen(
+                "</sheetData>",
+                concat!(
+                    r#"</sheetData><protectedRanges><protectedRange sqref="B2:C5 E5" name="入力欄"/><protectedRange sqref="D4" name="消える"/></protectedRanges>"#,
+                    r#"<sortState ref="B3:F20"><sortCondition ref="C3:C20"/></sortState>"#,
+                    r#"<customSheetViews><customSheetView guid="{00000000-0000-0000-0000-000000000001}" filter="1" showAutoFilter="1">"#,
+                    r#"<pane xSplit="1" ySplit="3" topLeftCell="B4" activePane="bottomRight" state="frozen"/>"#,
+                    r#"<selection pane="bottomRight" activeCell="C6" sqref="C6:D7"/>"#,
+                    r#"<rowBreaks count="2" manualBreakCount="2"><brk id="4" max="16383" man="1"/><brk id="10" max="16383" man="1"/></rowBreaks>"#,
+                    r#"<colBreaks count="1" manualBreakCount="1"><brk id="5" max="1048575" man="1"/></colBreaks>"#,
+                    r#"<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>"#,
+                    r#"<autoFilter ref="B3:F20"><filterColumn colId="1"><filters><filter val="a"/></filters></filterColumn><filterColumn colId="3"><filters><filter val="b"/></filters></filterColumn></autoFilter>"#,
+                    r#"</customSheetView></customSheetViews>"#,
+                ),
+                1,
+            );
+            // (The sheet's, after those of the view.)
+            let i = text.rfind("<pageMargins").unwrap();
+            let end = i + text[i..].find("/>").unwrap() + 2;
+            format!(
+                r#"{}<cellWatches><cellWatch r="D4"/><cellWatch r="F8"/></cellWatches><ignoredErrors><ignoredError sqref="D4" numberStoredAsText="1"/><ignoredError sqref="A1:F9" formula="1"/></ignoredErrors>{}"#,
+                &text[..end],
+                &text[end..]
+            )
+        },
+        &[],
+    )
+}
+
+fn sheet_after(book: &Workbook) -> String {
+    parts(&write(book))["xl/worksheets/sheet1.xml"].clone()
+}
+
+#[test]
+fn kept_areas_move_with_inserted_rows_and_columns() {
+    let edit_rows = umya_spreadsheet::helper::rewrite::LineEdit::insert_rows(3, 2);
+    let edit_cols = umya_spreadsheet::helper::rewrite::LineEdit::insert_columns(3, 1);
+    let mut book = read(&with_areas());
+    book.edit_lines("Sheet1", &edit_rows, &mut |_, _| None).unwrap();
+    book.edit_lines("Sheet1", &edit_cols, &mut |_, _| None).unwrap();
+    let sheet = sheet_after(&book);
+    for what in [
+        // B2:C5 E5 → rows 3.. down 2 → B2:C7 E7 → column C.. right 1 → B2:D7 F7.
+        r#"<protectedRange sqref="B2:D7 F7" name="入力欄"/>"#,
+        r#"<protectedRange sqref="E6" name="消える"/>"#,
+        r#"topLeftCell="B6""#,
+        r#"activeCell="D8" sqref="D8:E9""#,
+        // Breaks after rows 4 and 10 → 6 and 12; after column 5 → 6.
+        r#"<brk id="6" max="16383" man="1"/><brk id="12" max="16383" man="1"/>"#,
+        r#"<brk id="6" max="1048575" man="1"/>"#,
+        // The filter of B3:F20 → B5:G22; its columns C and E → D and F.
+        r#"<autoFilter ref="B5:G22"><filterColumn colId="2">"#,
+        r#"<filterColumn colId="4">"#,
+        r#"<cellWatch r="E6"/><cellWatch r="G10"/>"#,
+        r#"<sortState ref="B5:G22"><sortCondition ref="D5:D22"/></sortState>"#,
+        r#"<ignoredError sqref="E6" numberStoredAsText="1"/><ignoredError sqref="A1:G11" formula="1"/>"#,
+    ] {
+        assert!(sheet.contains(what), "{what}: {sheet}");
+    }
+
+    // The same through the older functions.
+    let mut book = read(&with_areas());
+    book.insert_new_row("Sheet1", 3, 2);
+    book.insert_new_column_by_index("Sheet1", 3, 1);
+    assert_eq!(sheet_after(&book).matches(r#"<protectedRange sqref="B2:D7 F7""#).count(), 1);
+    assert!(sheet_after(&book).contains(r#"<autoFilter ref="B5:G22"><filterColumn colId="2">"#));
+}
+
+#[test]
+fn kept_areas_go_with_removed_rows_and_columns() {
+    let mut book = read(&with_areas());
+    // Row 4 and column D removed.
+    book.edit_lines("Sheet1", &umya_spreadsheet::helper::rewrite::LineEdit::remove_rows(4, 1), &mut |_, _| None).unwrap();
+    book.edit_lines("Sheet1", &umya_spreadsheet::helper::rewrite::LineEdit::remove_columns(4, 1), &mut |_, _| None).unwrap();
+    let sheet = sheet_after(&book);
+    for what in [
+        r#"<protectedRange sqref="B2:C4 D4" name="入力欄"/>"#,
+        r#"<cellWatches><cellWatch r="E7"/></cellWatches>"#,
+        r#"<ignoredErrors><ignoredError sqref="A1:E8" formula="1"/></ignoredErrors>"#,
+        // The break after row 4 goes up with it, the one after column 5 left.
+        r#"<brk id="3" max="16383" man="1"/><brk id="9" max="16383" man="1"/>"#,
+        r#"<brk id="4" max="1048575" man="1"/>"#,
+        // Column D goes: the filter of E (colId 3) is of D now (colId 2).
+        r#"<autoFilter ref="B3:E19"><filterColumn colId="1"><filters><filter val="a"/></filters></filterColumn><filterColumn colId="2">"#,
+    ] {
+        assert!(sheet.contains(what), "{what}: {sheet}");
+    }
+    assert!(!sheet.contains("消える"), "{sheet}");
+
+    // A break in the rows removed goes with them; the count follows.
+    let mut book = read(&with_areas());
+    book.edit_lines("Sheet1", &umya_spreadsheet::helper::rewrite::LineEdit::remove_rows(3, 3), &mut |_, _| None).unwrap();
+    let sheet = sheet_after(&book);
+    assert!(sheet.contains(r#"<rowBreaks count="1" manualBreakCount="1"><brk id="7" max="16383" man="1"/></rowBreaks>"#), "{sheet}");
+
+    // The filter of the column removed goes with it.
+    let mut book = read(&with_areas());
+    book.edit_lines("Sheet1", &umya_spreadsheet::helper::rewrite::LineEdit::remove_columns(3, 1), &mut |_, _| None).unwrap();
+    let sheet = sheet_after(&book);
+    assert!(sheet.contains(r#"<autoFilter ref="B3:E20"><filterColumn colId="2"><filters><filter val="b"/>"#), "{sheet}");
+    assert_eq!(sheet.matches("<filterColumn ").count(), 1, "{sheet}");
+
+    // Elements left with nothing are taken away.
+    let mut book = read(&with_areas());
+    book.edit_lines("Sheet1", &umya_spreadsheet::helper::rewrite::LineEdit::remove_rows(1, 20), &mut |_, _| None).unwrap();
+    let sheet = sheet_after(&book);
+    for gone in ["<protectedRanges", "<ignoredErrors", "<cellWatches"] {
+        assert!(!sheet.contains(gone), "{gone}: {sheet}");
+    }
+    assert!(sheet.contains("<customSheetViews"), "{sheet}");
+}

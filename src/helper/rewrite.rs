@@ -52,6 +52,15 @@ pub(crate) trait XmlRewrite {
     fn area(&mut self, _sheet: Option<&str>, _area: &str, _sqref: bool) -> Option<String> {
         None
     }
+
+    /// An element starts (its local name), before its attributes.
+    fn element(&mut self, _element: &[u8]) {}
+
+    /// Any attribute (by the local names of its element and itself), before
+    /// the others above: the new value, or `None` to leave it to them.
+    fn attribute(&mut self, _element: &[u8], _name: &[u8], _value: &str) -> Option<String> {
+        None
+    }
 }
 
 /// XML (of a part, or an element) rewritten by `rw`; `None` when nothing
@@ -141,6 +150,7 @@ pub(crate) fn rewrite_xml(data: &[u8], rw: &mut dyn XmlRewrite) -> Option<Vec<u8
 /// The start tag with its attributes rewritten, or `None` when they are not.
 fn attributes(rw: &mut dyn XmlRewrite, e: &BytesStart<'_>) -> Option<BytesStart<'static>> {
     let element = e.local_name().into_inner();
+    rw.element(element);
     let source = element == b"worksheetSource";
     let location = element == b"location";
     let mut values: Vec<(Vec<u8>, String)> = Vec::new();
@@ -153,7 +163,9 @@ fn attributes(rw: &mut dyn XmlRewrite, e: &BytesStart<'_>) -> Option<BytesStart<
     let mut changed = false;
     let mut news: Vec<Option<String>> = Vec::with_capacity(values.len());
     for (local, value) in &values {
-        let new = if source && local == b"sheet" {
+        let new = if let Some(new) = rw.attribute(element, local, value) {
+            (new != *value).then_some(new)
+        } else if source && local == b"sheet" {
             rw.source_sheet(value)
         } else if source && local == b"ref" {
             sheet.as_deref().and_then(|sheet| rw.area(Some(sheet), value, false))
@@ -429,6 +441,170 @@ impl XmlRewrite for AreaXml<'_> {
             None => sqref.then(String::new),
         }
     }
+}
+
+/// The areas and cells of the elements of the sheet edited kept as read
+/// (custom views, the ranges users may edit, the errors not to flag, the
+/// sort, scenarios, watches, smart tags) rewritten in their XML. What is all
+/// removed gets an empty value, for [`remove_marked`] to take it away.
+pub(crate) struct KeptAreaXml<'a> {
+    pub(crate) edit: &'a LineEdit,
+    /// The autoFilter being read: its first column before and after.
+    filter:          Option<(u32, Option<u32>)>,
+    /// The page breaks being read are of rows (`true`) or columns.
+    breaks:          Option<bool>,
+}
+
+impl<'a> KeptAreaXml<'a> {
+    pub(crate) fn new(edit: &'a LineEdit) -> Self {
+        Self { edit, filter: None, breaks: None }
+    }
+
+    /// A cell or area moved; `Some("")` when it is removed and `gone` (it
+    /// goes with it), `None` when it is left as it is.
+    fn moved(&self, value: &str, sqref: bool, gone: bool) -> Option<String> {
+        let new = if sqref { self.edit.areas(value) } else { self.edit.area(value) };
+        match new {
+            Some(new) => Some(new),
+            None => gone.then(String::new),
+        }
+    }
+}
+
+impl XmlRewrite for KeptAreaXml<'_> {
+    fn formula(&mut self, _formula: &str) -> Option<String> {
+        None
+    }
+
+    fn element(&mut self, element: &[u8]) {
+        match element {
+            b"rowBreaks" => self.breaks = Some(true),
+            b"colBreaks" => self.breaks = Some(false),
+            b"autoFilter" => self.filter = None,
+            _ => {}
+        }
+    }
+
+    fn attribute(&mut self, element: &[u8], name: &[u8], value: &str) -> Option<String> {
+        match (element, name) {
+            (b"protectedRange" | b"ignoredError", b"sqref") => self.moved(value, true, true),
+            (b"selection" | b"scenarios", b"sqref") => self.moved(value, true, false),
+            (b"cellWatch" | b"cellSmartTags", b"r") => self.moved(value, false, true),
+            (b"selection", b"activeCell") | (b"pane", b"topLeftCell") | (b"inputCells", b"r") => {
+                self.moved(value, false, false)
+            }
+            (b"sortState" | b"sortCondition", b"ref") => self.moved(value, false, false),
+            (b"autoFilter", b"ref") => {
+                let new = self.edit.area(value);
+                let first = |area: &str| parse_point(area.split(':').next()?)?.0;
+                if let Some(old) = first(value) {
+                    self.filter = Some((old, new.as_deref().and_then(first)));
+                }
+                new
+            }
+            // The column of a filter counts from the first of the autoFilter.
+            (b"filterColumn", b"colId") => {
+                let (old_first, new_first) = self.filter?;
+                if self.edit.axis != LineAxis::Columns || self.edit.band.is_some() {
+                    return None;
+                }
+                let column = old_first + value.parse::<u32>().ok()?;
+                match (self.edit.index(column), new_first) {
+                    (Some(column), Some(first)) if column >= first => Some((column - first).to_string()),
+                    _ => Some(String::new()),
+                }
+            }
+            // A manual page break is after the row (column) of its id.
+            (b"brk", b"id") => {
+                let rows = self.breaks?;
+                if rows != (self.edit.axis == LineAxis::Rows) || self.edit.band.is_some() {
+                    return None;
+                }
+                let id = value.parse::<u32>().ok()?;
+                let edit = self.edit;
+                let new = if edit.insert {
+                    edit.index(id)
+                } else if id + 1 >= edit.at + edit.count {
+                    Some(id - edit.count)
+                } else if id < edit.at {
+                    Some(id)
+                } else {
+                    None
+                };
+                Some(new.filter(|n| *n > 0).map(|n| n.to_string()).unwrap_or_default())
+            }
+            _ => None,
+        }
+    }
+}
+
+/// XML with the elements [`KeptAreaXml`] emptied taken away (a range users
+/// may edit, an error not to flag, a watch... all of whose cells are
+/// removed, the filter of a column removed, a page break in rows removed),
+/// and the counts of the page breaks left; `None` when there are none.
+pub(crate) fn remove_marked(xml: &str) -> Option<String> {
+    const MARKED: [(&str, &str); 6] = [
+        ("protectedRange", "sqref"),
+        ("ignoredError", "sqref"),
+        ("cellWatch", "r"),
+        ("cellSmartTags", "r"),
+        ("filterColumn", "colId"),
+        ("brk", "id"),
+    ];
+    let mut out = xml.to_string();
+    let mut changed = false;
+    for (name, attr) in MARKED {
+        let open = format!("<{name} ");
+        let mark = format!(" {attr}=\"\"");
+        let mut from = 0;
+        while let Some(i) = out[from..].find(&open).map(|i| i + from) {
+            let Some(tag_end) = out[i..].find('>').map(|j| i + j) else { break };
+            if !out[i..tag_end].contains(&mark) {
+                from = tag_end;
+                continue;
+            }
+            let end = if out[..tag_end].ends_with('/') {
+                tag_end + 1
+            } else {
+                let close = format!("</{name}>");
+                match out[tag_end..].find(&close) {
+                    Some(j) => tag_end + j + close.len(),
+                    None => break,
+                }
+            };
+            out.replace_range(i..end, "");
+            changed = true;
+            from = i;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    // The counts of the page breaks.
+    for name in ["rowBreaks", "colBreaks"] {
+        let open = format!("<{name}");
+        let close = format!("</{name}>");
+        let mut from = 0;
+        while let Some(i) = out[from..].find(&open).map(|i| i + from) {
+            let Some(tag_end) = out[i..].find('>').map(|j| i + j) else { break };
+            let end = out[tag_end..].find(&close).map_or(tag_end, |j| tag_end + j);
+            let inner = &out[tag_end..end];
+            let count = inner.matches("<brk ").count();
+            let manual = inner.split("<brk ").skip(1).filter(|b| b[..b.find('>').unwrap_or(0)].contains("man=\"1\"")).count();
+            let mut tag = out[i..tag_end].to_string();
+            for (attr, n) in [("count", count), ("manualBreakCount", manual)] {
+                let key = format!(" {attr}=\"");
+                if let Some(k) = tag.find(&key) {
+                    let start = k + key.len();
+                    let len = tag[start..].find('"').unwrap_or(0);
+                    tag.replace_range(start..start + len, &n.to_string());
+                }
+            }
+            out.replace_range(i..tag_end, &tag);
+            from = i + tag.len();
+        }
+    }
+    Some(out)
 }
 
 /// XML kept with the sparklines whose cells are all removed (an empty
