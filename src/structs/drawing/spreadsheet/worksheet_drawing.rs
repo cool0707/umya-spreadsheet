@@ -601,15 +601,20 @@ impl WorksheetDrawing {
                               anchor: &KeptAnchor| {
             let relationships = kept_relationships.next().map_or(0, Vec::len);
             let mut ids = Vec::with_capacity(relationships);
-            for image in anchor.model_images().take(relationships) {
-                match image {
+            for (image, fixed) in anchor.model_images().zip(anchor.fixed_ids()).take(relationships) {
+                match (image, fixed) {
                     // A picture the model writes: the relationship it has.
-                    Some(name) => {
+                    (Some(name), _) => {
                         let mut media = crate::structs::MediaObject::default();
                         media.set_image_name(name);
                         ids.push(format!("rId{}", media.rid(rel_list)));
                     }
-                    None => {
+                    // One with an id of its own.
+                    (None, Some(id)) => {
+                        rel_list.push((format!("{KEPT}#{id}"), kept_no.to_string()));
+                        ids.push(id.to_string());
+                    }
+                    (None, None) => {
                         rel_list.push((KEPT.to_string(), kept_no.to_string()));
                         ids.push(format!("rId{}", rel_list.len()));
                     }

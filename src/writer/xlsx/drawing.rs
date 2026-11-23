@@ -55,12 +55,17 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     // The relationships of the kept anchors, in the order they were listed.
     let kept: Vec<&(String, String, bool)> = kept_relationships.iter().flatten().collect();
     for (key, value) in &mut rel_list {
-        if key == KEPT {
+        let fixed = key.strip_prefix(KEPT).and_then(|k| k.strip_prefix('#')).map(str::to_string);
+        if key == KEPT || fixed.is_some() {
             if let Some((rel_type, target, external)) =
                 value.parse::<usize>().ok().and_then(|n| kept.get(n))
             {
                 *key = format!("{KEPT}{}", if *external { "X" } else { "" });
-                *value = format!("{rel_type}\n{target}");
+                *value = match &fixed {
+                    // (With the id it is written with.)
+                    Some(id) => format!("{rel_type}\n{target}\n{id}"),
+                    None => format!("{rel_type}\n{target}"),
+                };
             }
         }
     }

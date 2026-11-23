@@ -27,6 +27,9 @@ pub(crate) fn read(
     let mut ole_index = 0;
     let mut comment_index = 0;
     let mut buf = Vec::new();
+    // The namespaces of the root but those the writer declares on its own
+    // (`xmlns:w10`...), for the shapes kept to declare those they use.
+    let mut namespaces: Vec<(String, String)> = Vec::new();
 
     loop {
         let before = usize::try_from(reader.buffer_position()).unwrap_or(0);
@@ -44,7 +47,7 @@ pub(crate) fn read(
                 if obj.client_data().comment_column_target().is_some() {
                     // The frame of the comment as it was read.
                     if let Some(xml) = raw.get(before..after).and_then(|x| std::str::from_utf8(x).ok()) {
-                        obj.set_kept(xml.trim_start());
+                        obj.set_kept(&crate::structs::declare_namespaces(xml.trim_start(), &namespaces));
                     }
                     if let Some(comment) = worksheet.comments_mut().get_mut(comment_index) {
                         comment.set_shape(obj);
@@ -60,6 +63,12 @@ pub(crate) fn read(
                     }
                     ole_index += 1;
                 }
+            }
+            b"xml" => {
+                namespaces = crate::structs::root_namespaces(&e)
+                    .into_iter()
+                    .filter(|(k, _)| !matches!(k.as_str(), "xmlns:v" | "xmlns:o" | "xmlns:x"))
+                    .collect();
             }
             // The types of the shapes, for the frames of comments of other
             // shapes than Excel's text box.

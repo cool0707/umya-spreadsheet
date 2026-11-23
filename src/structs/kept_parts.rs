@@ -101,6 +101,10 @@ pub(crate) struct PartStore {
     defaults:  HashMap<String, String>,
 }
 
+/// Where parts kept may be named: the relationships part, the folder of the
+/// parts it refers to, which relationships go to parts kept.
+type Seed<'a> = (&'a str, &'a str, fn(&str) -> bool);
+
 impl PartStore {
     pub(crate) fn read<R: Read + io::Seek>(arv: &mut zip::read::ZipArchive<R>) -> Self {
         let mut store = PartStore::default();
@@ -136,7 +140,7 @@ impl PartStore {
         // The parts of the workbook and of the package kept (in folders of
         // their own or not: `xl/connections.xml`, `docMetadata/LabelInfo.xml`),
         // the query tables of the tables.
-        let seeds: [(&str, &str, fn(&str) -> bool); 2] = [
+        let seeds: [Seed<'_>; 2] = [
             ("xl/_rels/workbook.xml.rels", "xl", KeptRelationships::is_kept_type),
             ("_rels/.rels", "", is_package_kept_type),
         ];
@@ -409,6 +413,19 @@ impl KeptPart {
     #[cfg(test)]
     pub(crate) fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    /// The content as text.
+    pub(crate) fn text(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.data)
+    }
+
+    /// Replaces `from` by `to` in the content.
+    pub(crate) fn replace_text(&mut self, from: &str, to: &str) {
+        let text = self.text();
+        if text.contains(from) {
+            self.data = text.replace(from, to).into_bytes();
+        }
     }
 }
 

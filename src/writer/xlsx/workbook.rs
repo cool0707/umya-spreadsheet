@@ -69,9 +69,7 @@ pub(crate) fn write<W: io::Seek + io::Write>(
     );
 
     // fileVersion (as read, or Excel's)
-    if !wb.kept_relationships().xml("fileVersion").is_empty() {
-        write_kept(wb, &mut writer, "fileVersion");
-    } else {
+    if wb.kept_relationships().xml("fileVersion").is_empty() {
         write_start_tag(
             &mut writer,
             "fileVersion",
@@ -83,6 +81,8 @@ pub(crate) fn write<W: io::Seek + io::Write>(
             ],
             true,
         );
+    } else {
+        write_kept(wb, &mut writer, "fileVersion");
     }
 
     // fileSharing (kept as read)

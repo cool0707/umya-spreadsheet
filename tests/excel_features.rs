@@ -368,6 +368,18 @@ fn smartart_survives_a_round_trip() {
             assert!(rels.contains(&format!("Id=\"{id}\"")), "{attr}={id} is not a relationship of the drawing");
         }
     }
+    // The drawing of the diagram (what Excel draws until it lays the diagram
+    // out again) goes with it, under the id its data names.
+    assert!(after.contains_key("xl/diagrams/drawing1.xml"), "{:?}", after.keys().collect::<Vec<_>>());
+    let rel_id = values(&after["xl/diagrams/data1.xml"], "relId")[0].to_string();
+    assert!(
+        rels.contains(&format!(r#"Id="{rel_id}" Type="http://schemas.microsoft.com/office/2007/relationships/diagramDrawing" Target="/xl/diagrams/drawing1.xml""#)),
+        "{rel_id}: {rels}"
+    );
     // The chart of the same drawing is still there.
     assert!(after.keys().any(|k| k.starts_with("xl/charts/chart")));
+    // And again.
+    let again = parts(&write(&read(&write(&read(&edited)))));
+    assert_eq!(values(&again["xl/diagrams/data1.xml"], "relId"), [rel_id.as_str()]);
+    assert!(again[&rels_of("xl/drawings/drawing1.xml")].contains(&format!("Id=\"{rel_id}\"")));
 }

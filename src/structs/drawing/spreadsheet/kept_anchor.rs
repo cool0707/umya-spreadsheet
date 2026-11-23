@@ -78,6 +78,10 @@ struct KeptAnchorRelationship {
     /// A picture the model writes (the anchor is read into the model as
     /// well): the name of its file (`image1.png`).
     model_image: Option<String>,
+    /// The id it is written with, when it is not one of the anchor's XML but
+    /// of a part it refers to: the drawing of a `SmartArt` diagram, which its
+    /// data names (`dsp:dataModelExt/@relId`).
+    fixed_id: Option<String>,
 }
 
 /// The relationships of a drawing, as read: id -> (type, target, external,
@@ -395,6 +399,7 @@ impl KeptAnchor {
                     external: *external,
                     part,
                     model_image,
+                    fixed_id: None,
                 });
                 ids.push(id);
                 ids.len() - 1
@@ -406,10 +411,45 @@ impl KeptAnchor {
                 );
             }
         }
+        // The drawing of a SmartArt diagram: its data names it by the id of
+        // the relationship of the drawing, which it is written with.
+        let mut drawings = Vec::new();
+        for r in &mut list {
+            if !r.rel_type.ends_with("/diagramData") {
+                continue;
+            }
+            let Some(part) = &mut r.part else { continue };
+            let text = part.text();
+            let Some(i) = text.find(" relId=\"") else { continue };
+            let rest = &text[i + " relId=\"".len()..];
+            let id = rest[..rest.find('"').unwrap_or(0)].to_string();
+            let Some((_, rel_type, target, false, path)) = relationships.iter().find(|r| r.0 == id) else {
+                continue;
+            };
+            let Some(drawing) = store.part(path) else { continue };
+            let fixed = if id.starts_with("rIdDgm") { id.clone() } else { format!("rIdDgm{}", id.trim_start_matches("rId")) };
+            part.replace_text(&format!(" relId=\"{id}\""), &format!(" relId=\"{fixed}\""));
+            drawings.push(KeptAnchorRelationship {
+                id,
+                rel_type: rel_type.clone(),
+                target: target.clone(),
+                external: false,
+                part: Some(drawing),
+                model_image: None,
+                fixed_id: Some(fixed),
+            });
+        }
+        list.extend(drawings);
         Some(KeptAnchor {
             xml,
             relationships: list,
         })
+    }
+
+    /// For each relationship, the id it is written with when it has one of
+    /// its own.
+    pub(crate) fn fixed_ids(&self) -> impl Iterator<Item = Option<&str>> {
+        self.relationships.iter().map(|r| r.fixed_id.as_deref())
     }
 
     /// The chart as the model of this crate has it, for an anchor of two

@@ -51,7 +51,7 @@ pub(crate) fn read<R: io::Read + io::Seek>(
                                 wb.set_date1904(v == "1" || v == "true");
                             }
                             b"codeName" => {
-                                wb.set_code_name(v.to_string());
+                                wb.set_code_name(v.clone());
                             }
                             b"filterPrivacy" => {}
                             key if !key.contains(&b':') => {

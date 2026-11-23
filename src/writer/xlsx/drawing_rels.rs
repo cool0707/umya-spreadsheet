@@ -80,9 +80,14 @@ pub(crate) fn write<W: io::Seek + io::Write>(
         } else if let Some(mode) = key.strip_prefix(KEPT) {
             // A relationship of a chart kept as it was read: type, target.
             if let Some((rel_type, target)) = value.split_once('\n') {
-                is_write = write_relationship(
+                // (Some have an id of their own after the target.)
+                let (target, id) = match target.split_once('\n') {
+                    Some((target, id)) => (target, id.to_string()),
+                    None => (target, format!("rId{r_id}")),
+                };
+                is_write = write_relationship_with_id(
                     &mut writer,
-                    r_id,
+                    &id,
                     rel_type,
                     target,
                     if mode == "X" { "External" } else { "" },
@@ -106,9 +111,18 @@ fn write_relationship(
     p_target: &str,
     p_target_mode: &str,
 ) -> bool {
-    let r_id_str = format!("rId{r_id}");
+    write_relationship_with_id(writer, &format!("rId{r_id}"), p_type, p_target, p_target_mode)
+}
+
+fn write_relationship_with_id(
+    writer: &mut Writer<io::Cursor<Vec<u8>>>,
+    r_id_str: &str,
+    p_type: &str,
+    p_target: &str,
+    p_target_mode: &str,
+) -> bool {
     let mut attributes: crate::structs::AttrCollection = Vec::new();
-    attributes.push(("Id", &r_id_str).into());
+    attributes.push(("Id", r_id_str).into());
     attributes.push(("Type", p_type).into());
     attributes.push(("Target", p_target).into());
     if !p_target_mode.is_empty() {
