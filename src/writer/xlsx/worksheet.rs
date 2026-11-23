@@ -590,6 +590,7 @@ fn write_tables_and_objects(writer: &mut InternalWriter, worksheet: &Worksheet, 
     // In the order of the schema: oleObjects, controls, tableParts (the ids
     // as before: the tables first).
     let tables = if worksheet.has_table() { worksheet.tables().len() } else { 0 };
+    write_kept(writer, worksheet, "legacyDrawingHF");
     write_kept(writer, worksheet, "picture");
     let ole_id = 1000 + 25;
     worksheet

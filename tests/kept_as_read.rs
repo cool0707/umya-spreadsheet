@@ -456,3 +456,50 @@ fn embedded_documents_of_other_applications() {
     let picture = values(ole, "r:id")[1];
     assert!(rels.contains(&format!(r#"Id="{picture}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image""#)), "{rels}");
 }
+
+#[test]
+fn the_pictures_of_headers_and_footers() {
+    let mut book = umya_spreadsheet::new_file();
+    let ws = book.sheet_mut(0).unwrap();
+    ws.cell_mut("A1").set_value("1");
+    ws.header_footer_mut().odd_header_mut().set_value("&C&G");
+    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout><v:shape id="CH" o:spid="_x0000_s1025" type="#_x0000_t75" style="position:absolute;margin-left:0;margin-top:0;width:72pt;height:36pt;z-index:1"><v:imagedata o:relid="rId1" o:title="logo"/><o:lock v:ext="edit" rotation="t"/></v:shape></xml>"##;
+    let rel = r#"<Relationship Id="rIdHF" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawingHF1.vml"/>"#;
+    let written = write(&book);
+    let has_rels = parts(&written).contains_key("xl/worksheets/_rels/sheet1.xml.rels");
+    let sheet_rels = format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rel}</Relationships>"#);
+    let mut add = vec![
+        ("xl/drawings/vmlDrawingHF1.vml", vml),
+        (
+            "xl/drawings/_rels/vmlDrawingHF1.vml.rels",
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.png"/></Relationships>"#,
+        ),
+        ("xl/media/logo.png", "PNG of the logo"),
+    ];
+    if !has_rels {
+        add.push(("xl/worksheets/_rels/sheet1.xml.rels", &sheet_rels));
+    }
+    let source = edit(
+        &written,
+        |name, text| match name {
+            "xl/worksheets/sheet1.xml" => text.replace("</worksheet>", r#"<legacyDrawingHF r:id="rIdHF"/></worksheet>"#),
+            "xl/worksheets/_rels/sheet1.xml.rels" => text.replace("</Relationships>", &format!("{rel}</Relationships>")),
+            "[Content_Types].xml" => text.replace(
+                "</Types>",
+                r#"<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/><Default Extension="png" ContentType="image/png"/></Types>"#,
+            ),
+            _ => text,
+        },
+        &add,
+    );
+    let after = parts(&round_trip(&source));
+    let sheet = "xl/worksheets/sheet1.xml";
+    assert!(after[sheet].contains("<legacyDrawingHF r:id="), "{}", after[sheet]);
+    assert!(index(&after[sheet], "<headerFooter") < index(&after[sheet], "<legacyDrawingHF"));
+    ids_resolve(&after, sheet, &["r:id"]);
+    let vml = after.iter().find(|(k, v)| k.ends_with(".vml") && v.contains("o:title=\"logo\"")).map(|(k, _)| k.clone()).unwrap();
+    assert!(after[&rels_of(&vml)].contains("relationships/image"));
+    assert!(after.values().any(|v| v == "PNG of the logo"));
+    // Not read as the frames of comments.
+    assert!(!after.values().any(|v| v.contains("<x:ClientData")));
+}

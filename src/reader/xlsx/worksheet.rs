@@ -82,8 +82,9 @@ pub(crate) fn read(
 /// written back in their place (`write_kept` of the writer): how the sheet
 /// is calculated, the ranges users may edit, scenarios, the sort, the
 /// consolidation, custom views, the errors not to flag, smart tags, custom
-/// properties, watches, the background picture, publishing to the web.
-pub(crate) const KEPT_ELEMENTS: [&[u8]; 12] = [
+/// properties, watches, the pictures of the headers and footers, the
+/// background picture, publishing to the web.
+pub(crate) const KEPT_ELEMENTS: [&[u8]; 13] = [
     b"sheetCalcPr",
     b"protectedRanges",
     b"scenarios",
@@ -94,6 +95,7 @@ pub(crate) const KEPT_ELEMENTS: [&[u8]; 12] = [
     b"smartTags",
     b"customProperties",
     b"cellWatches",
+    b"legacyDrawingHF",
     b"picture",
     b"webPublishItems",
 ];

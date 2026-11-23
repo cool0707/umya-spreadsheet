@@ -633,9 +633,13 @@ fn normalize_part(path: &str) -> String {
 
 /// The relationships of a sheet kept when an element kept as read refers to
 /// them (`r:id`): pictures, printer settings (of custom views), custom
-/// properties. The model reads others of the same types for itself.
+/// properties, the drawings of the pictures of headers and footers
+/// (`legacyDrawingHF`). The model reads others of the same types for itself.
 pub(crate) fn is_sheet_kept_target(rel_type: &str) -> bool {
-    matches!(rel_type.rsplit('/').next(), Some("image" | "printerSettings" | "customProperty"))
+    matches!(
+        rel_type.rsplit('/').next(),
+        Some("image" | "printerSettings" | "customProperty" | "vmlDrawing")
+    )
 }
 
 /// The namespaces (`xmlns:xr9`...) a root element declares, but the default one.

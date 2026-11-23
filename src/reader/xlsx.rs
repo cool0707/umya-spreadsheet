@@ -310,8 +310,10 @@ pub(crate) fn raw_to_deserialize_by_worksheet(
             }
         }
         for relationship in v.relationship_list() {
-            // vmlDrawing
-            if relationship.get_type() == VML_DRAWING_NS {
+            // vmlDrawing (not that of the headers and footers, kept as read)
+            if relationship.get_type() == VML_DRAWING_NS
+                && !worksheet.kept_relationships().refers_to(relationship.id())
+            {
                 vml_drawing::read(
                     worksheet,
                     relationship.raw_file(),

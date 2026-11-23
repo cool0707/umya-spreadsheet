@@ -56,15 +56,20 @@
 
 ## 3. 保存で落ちないようにしたもの
 
-仕組みは 3 つ:
+仕組みは 4 つ:
 
 1. **モデルに足す**: 読み書きする値として持つ。
 2. **読んだまま持つ**: 中身を見ずに読んだ XML や部品のまま持ち、保存で書き戻す。
-   - 部品: `kept_parts.rs` の `KeptRelationships`。
+   - 部品: `kept_parts.rs` の `KeptRelationships`（ブック・シート・テーブル・パッケージのリレーションごと）。
    - 描画のアンカー: `KeptAnchor`。
    - 要素や属性: `other_attributes` と、要素を読んだまま持つもの。
-3. **本家の修正を取り込む**。
-
+3. **読んだまま持ち、モデルも読む**: モデルにも読み、モデルが読んだときのままなら読んだものを、モデルで変えたらモデルから書く。
+   モデルの `Debug` の表現のハッシュで比べ、読んだものは `Debug` に出さない。
+   - グラフ（`Chart::kept_unchanged`）、図形と画像のアンカー（`TwoCellAnchor` / `OneCellAnchor::kept_unchanged`。`KeptShape`）、
+     テーマ（`Theme::kept_unchanged`）、メモの枠（VML の `Shape::kept_unchanged`。位置はハッシュから除き、書くときにモデルの位置に置き換える）。
+   - 行・列の挿入と削除では、モデルと読んだものの両方を動かし、変えていない扱いのままにする。
+   - 画像のアンカーの画像の部品はモデルが書く（同じ部品を 2 つ持たない）。
+4. **本家の修正を取り込む**。
 ### 3.1 部品や描画ごと落ちていたもの（読んだまま持つ）
 
 - グラフ（chartEx も）、ピボットテーブルとキャッシュ、外部リンク、スライサー、タイムライン、フォームコントロールのプロパティ、カスタム XML
@@ -72,6 +77,11 @@
 - SmartArt（`xl/diagrams`）
 - VBA プロジェクトの署名（`vbaProjectSignature*.bin`）
 - 色のパレット（`styles.xml` の `colors`）、ブックのテーブルスタイル
+- 外部データの接続（`xl/connections.xml`）とクエリ（`xl/queryTables`。テーブルとシートから）、データモデル（Power Pivot）
+- パッケージが参照する部品（`_rels/.rels`）: 秘密度ラベル（`docMetadata/LabelInfo.xml`）、リボンのカスタマイズ（`customUI`）、作業ウィンドウのアドインなど。
+  ブックとそのプロパティ・サムネイル・デジタル署名（書いた中身と合わない）は除く
+- SmartArt の描画のキャッシュ（`xl/diagrams/drawing*.xml`）。データの `dsp:dataModelExt` の `relId` が指すので、描画のリレーションをその id（`rIdDgm…`）で書く
+- ほかのアプリの文書の埋め込み（Word・PowerPoint・マクロ付きブック）。以前は `.xlsx` と `.bin` しか書かず、`oleObject` の `r:id` が画像を指していた
 
 ### 3.2 一部が落ちていたもの
 
@@ -102,29 +112,33 @@
   - 印刷しない図形、代替テキスト
   - 線の始点の矢印、図形の文字の下線・上付き
   - 反射などの効果、画像とコネクタのマクロ
-- **コメント**: スレッド形式のコメントの作者・返信・解決済み
+  - 図形・画像のモデルにないもの（色の名前 `a:prstClr`、文字の段落の 2〜9 段目 `a:lvl2pPr`〜、Excel 2010 の互換用の隠した塗り・線・効果
+    `a14:hiddenFill` など、グラデーション）。アンカーを読んだまま書く（3 の仕組み）。フォームコントロールの図形（`a14:compatExt`）はモデルから書く
+- **コメント**: スレッド形式のコメントの作者・返信・解決済み。メモの枠の書式（塗り・線の矢印・文字の配置）と、Excel のテキストボックス以外の形の定義（`v:shapetype`）
+- **テーマ**: 新しく描く図形の既定のスタイル（`objectDefaults`）、グラデーションの形（`fillToRect`・`path`）、拡張。読んだまま書く（3 の仕組み）
+- **ブック（`workbook.xml`）**: `fileVersion`、書き込みのパスワードと読み取り専用の推奨（`fileSharing`）、`workbookPr` の属性（`showObjects`・`backupFile`・`codeName` など）、
+  ユーザー設定のビュー（`customWorkbookViews`）、`oleSize`、スマートタグ、Web 公開、`fileRecoveryPr`
+- **シート**: 計算の設定（`sheetCalcPr`）、範囲の編集の許可（`protectedRanges`）、シナリオ、並べ替え（`sortState`）、統合（`dataConsolidate`）、
+  ユーザー設定のビュー（`customSheetViews`。ビューごとのプリンターの設定も）、エラーチェックを無視するセル（`ignoredErrors`）、スマートタグ、
+  ユーザー設定のプロパティ（`customProperties`）、ウォッチ、ヘッダー・フッターの画像（`legacyDrawingHF` とその VML）、背景の画像（`picture`）、Web 公開、`sheetPr` の属性と `outlinePr`（グループの集計行の位置）、
+  マクロのないブックのシートの `codeName`
+- **名前の定義**: `function`・`vbProcedure`・`comment` などの属性（マクロを名前として登録したもの）
+- **ハイパーリンク**: `display`
 - **行・列の挿入と削除、シートのコピー**: Excel と同じように参照を付け替える（`Workbook::edit_lines` / `copy_sheet`）
 
 詳しい中身と理由は xljs の `docs/design/pdf-design.md` 7 章（フォークで直したもの）と `docs/design/save-fidelity.md` にある。
 
 ## 4. まだ足りないもの（保存で落ちるもの）
 
-2026-11-22 に、xljs・RAS・このクレートのテスト用のブック 107 冊を開いて保存し、部品と要素と属性を比べた結果。比べ方は 5 章。
+2026-11-22 に、xljs・RAS・このクレートのテスト用のブック 107 冊を開いて保存し、部品と要素と属性を比べた結果（2026-11-23 に直したものを除いた）。比べ方は 5 章。
 優先度は、起きやすさと、気づかずに業務のブックを壊す度合いで付けた。
 
 | 優先 | 落ちるもの | 中身 |
 |---|---|---|
-| 中 | 外部データの接続とクエリ | `xl/connections.xml`、`xl/queryTables`、テーブルからクエリへのリレーション。Power Query などで取り込んだテーブルの更新の設定が消える |
-| 中 | 秘密度ラベル | `docMetadata/LabelInfo.xml`（Microsoft Purview のラベル）。ラベルが外れる |
-| 中 | 描画のモデルにないもの | 色の名前（`a:prstClr`）、文字の段落の 2〜9 段目の設定（`a:lvl2pPr`〜）、Excel 2010 の互換用の隠した塗り・線・効果（`a14:hiddenFill` など）、図形の一部のグラデーション。図形全体を読んだまま持つ仕組み（グラフの `KeptAnchor` と同じもの）にすれば一度に直る |
 | 低 | フォームコントロールの VML | `vmlDrawing*.vml`、シートの `legacyDrawing`、描画の `a14:compatExt`。Excel 2010 以降はシートの `controls`・`ctrlProps`・描画から読むので元どおり動く。Excel 2007 以前と LibreOffice では見えない |
-| 低 | メモ（コメント）の枠の VML | 枠はこのクレートが作り直すので、枠の塗り（グラデーション）などの書式が既定に戻る |
-| 低 | テーマの一部 | テーマはモデルから作り直す。新しく描く図形の既定のスタイル（`objectDefaults`）、グラデーションの形（`fillToRect`・`path`）、テーマの拡張が落ちる |
-| 低 | ユーザー設定のビュー | `customWorkbookViews`、シートの `customSheetViews` |
-| 低 | 名前の定義の `function` / `vbProcedure` | マクロを名前として登録したもの（XLM の関数） |
-| 低 | SmartArt の描画のキャッシュ | `diagramDrawing`（`dsp:dataModelExt` の `relId`）。データ・レイアウト・スタイル・色は残るので、Excel が作り直すはず（実機では確かめていない） |
-| 低 | そのほか | ピボットキャッシュの外部の参照元、ユーザー設定のプロパティ（一部のブック）、`printerSettings`（一部のブック）、`showObjects`、`fileRecoveryPr`、`hyperlink` の `display` |
 | — | `.xlsb` | 読めない。RAS の `crates/ras-ovba` が VBA の部分だけを読む |
+
+読んだまま持つものは、行・列の挿入と削除で動かないものがある（ユーザー設定のビューのフィルターと選択範囲、`protectedRanges`・`ignoredErrors` の範囲）。
 
 ### 4.1 落ちても害のないもの
 
@@ -136,6 +150,9 @@
 - 接頭辞の違い（`x:sheet`→`sheet`、`wsDr`→`xdr:wsDr`）、部品の名前の番号（`theme.xml`→`theme1.xml`）。
 - インライン文字列（`<is>`）が共有文字列になること。
 - 共同編集の ID（`xr:uid`、`a16:creationId`）、コメントの `shapeId`。
+- 中身のないユーザー設定のプロパティ（`docProps/custom.xml`）、`date1904="false"`。
+- Id も Target もないリレーション（Google スプレッドシートがピボットキャッシュに書く `externalLinkPath`）。
+- どこからも参照されない部品（参照のない埋め込み・テーマの `theme.xml` の名前の違いなど）。
 
 ## 5. 調べ方
 
@@ -146,3 +163,4 @@
   - `tests/excel_features.rs`: Excel が作ったブックの機能、ActiveX、SmartArt。
   - `tests/format_fidelity.rs`: モデルから読めるもの、属性。
   - `tests/vba_project.rs`: VBA と署名。
+  - `tests/kept_as_read.rs`: 読んだまま持つもの（接続とクエリ、パッケージの部品、ユーザー設定のビューとシート・ブックの要素、ヘッダー・フッターの画像、図形・画像・テーマ・メモの枠、埋め込み）。
