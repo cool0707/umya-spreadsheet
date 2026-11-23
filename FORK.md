@@ -156,7 +156,7 @@
 
 ## 5. 調べ方
 
-- 部品・要素・属性の比較は、xljs の `tools/excel-verify/partdiff.py`（`py -I partdiff.py 元.xlsx 保存後.xlsx`）。手元のブックをまとめて調べるなら、このクレートで開いて保存する小さなプログラム（`reader::xlsx::read` → `writer::xlsx::write`）で書き出してから、1 冊ずつ比べる。
+- 部品・要素・属性の比較は、xljs の `tools/excel-verify/partdiff.py`（`py -I partdiff.py 元.xlsx 保存後.xlsx`）。手元のブックをまとめて調べるなら、`examples/roundtrip.rs` で開いて保存してから（`cargo run --release --example roundtrip -- 元1.xlsx 保存後1.xlsx 元2.xlsx 保存後2.xlsx ...`）、1 冊ずつ比べる。
 - Excel で開けるか、Excel から見て同じかは、Windows の実機の Excel で xljs の `tools/excel-verify/features.ps1` などを使う（xljs の `docs/design/excel-verify.md`）。
 - 直したものには、元に戻ったら分かるテストを付ける:
   - `tests/excel_compat.rs`: Excel で開けるか、描画。
